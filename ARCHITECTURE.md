@@ -64,7 +64,7 @@ Stores operational, state, and retrieval data.
 The request moves through a fixed state-driven workflow. 
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Customer Request] --> B[Intent Classifier]
     B --> C[Order Lookup]
     C --> D[Eligibility Check]
