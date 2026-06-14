@@ -273,19 +273,26 @@ This helps the system handle edge cases without hardcoding every policy branch.
 refund-guard/
 ├── .env.example
 ├── ARCHITECTURE.md
+├── ER_DIAGRAM.png
 ├── README.md
+├── mock.db
 ├── pyproject.toml
+├── refund-guard-db.sql
 ├── requirements.txt
 ├── uv.lock
 └── backend/
     ├── main.py
+    ├── setup_database.py
     └── agents/
+        ├── __init__.py
         ├── graph.py
         ├── nodes.py
         ├── prompt.py
         ├── state.py
         └── tools/
+            ├── __init__.py
             ├── db.py
+            ├── helper.py
             └── llm.py
 ```
 

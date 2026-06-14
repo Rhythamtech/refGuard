@@ -1,3 +1,4 @@
+from sqlite3 import Cursor
 import pathlib
 import sqlite3
 from pydantic import BaseModel
@@ -9,7 +10,7 @@ class SqliteOrderDB:
     """
 
     def __init__(self):
-        self.path = pathlib.Path(__file__).parent / "refund-guard-db.sql"
+        self.path = pathlib.Path(__file__).parent.parent / "refund-guard-db.sql"
         self.conn = None  
         self.cursor = None
         self.queries = self._read_sql_file()
@@ -17,10 +18,13 @@ class SqliteOrderDB:
 
     def connect_to_db(self):
         """Return a connection to the SQLite database."""
-        self.conn = sqlite3.connect("mock.db")
+        db_path = pathlib.Path(__file__).parent.parent / "mock.db"
+        self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
+
+        self.conn.commit()
         
-        return self.conn
+        return self.conn,self.cursor
 
     def _read_sql_file(self):
         """Read the SQL file."""

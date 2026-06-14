@@ -3,15 +3,21 @@ from pydantic import BaseModel
 from datetime import datetime
 from decimal import Decimal
 
+class EvidenceAnalysisSchema(BaseModel):
+    fraud_score: float
+    signals: List[str]
+
 class IntentOutput(BaseModel):
     intent: str          
+    order_item_id: str | None
     order_id: str | None
     reason_category: str 
     confidence: float
 
 class RefundRequest(BaseModel):
     customer_id: str
-    order_id: str
+    order_id : str
+    order_item_id: str
     reason: str
     evidence_urls: List[str] = [] 
 
@@ -38,7 +44,7 @@ class RefundState(TypedDict):
 
     # Populated by nodes
     intent: Optional[Literal["refund", "exchange", "inquiry", "cancel"]]
-    extracted_order_id: Optional[str]
+    extracted_order_item_id: Optional[str]
     order_data: Optional[OrderData]
 
     # Eligibility

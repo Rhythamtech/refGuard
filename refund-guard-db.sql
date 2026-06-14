@@ -667,7 +667,7 @@ VALUES
     'delivered',
     3299.00,
     '12, 3rd Main Road, Kasturi Nagar, Bengaluru, Karnataka - 560043',
-    'PayPal',
+    'UPI',
     '2026-02-05 11:10:00'
   ),
   (
@@ -707,7 +707,7 @@ VALUES
     'delivered',
     1499.00,
     'Block C, Salt Lake Sector 5, Kolkata, West Bengal - 700091',
-    'PayPal',
+    'UPI',
     '2026-02-10 12:00:00'
   ),
   (
@@ -767,7 +767,7 @@ VALUES
     'delivered',
     2198.00,
     '32, Rajpur Road, Dehradun, Uttarakhand - 248001',
-    'PayPal',
+    'UPI',
     '2026-02-15 13:00:00'
   ),
   (
@@ -807,7 +807,7 @@ VALUES
     'delivered',
     649.00,
     'Plot No 42, Vasant Vihar, Ahmedabad, Gujarat - 380015',
-    'PayPal',
+    'UPI',
     '2026-02-19 15:30:00'
   );
 

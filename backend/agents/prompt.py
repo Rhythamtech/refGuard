@@ -7,3 +7,14 @@ Reason categories: wrong_item | missing_item | not_delivered | damaged | quality
 Return valid JSON matching the IntentOutput schema."""),
     ("human", "Customer message: {message}\nContext: {context}")
 ])
+
+
+EVIDENCE_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are an evidence analyzer for a quick-commerce platform.
+You will be given details of evidence uploaded by a customer, and their message. Analyze it and determine the likelihood of fraud, or any anomalies.
+Extract: fraud_score, signals
+fraud_Score must be between 0.0 to 1.0 , 1.0 being highest
+signals should be a list of strings describing the fraud indicators
+Return valid JSON matching the EvidenceAnalysisSchema schema."""),
+    ("human", "Evidence details: {messages}")
+])
