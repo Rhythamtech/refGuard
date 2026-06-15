@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "langchain-architecture": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/langchain-architecture/SKILL.md",
+      "computedHash": "00751d08438c2de939624deb6434a2b7c9a1b90e47505eaa0af70b782399218c"
+    }
+  }
+}

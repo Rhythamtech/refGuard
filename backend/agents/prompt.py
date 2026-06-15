@@ -15,6 +15,7 @@ You will be given details of evidence uploaded by a customer, and their message.
 Extract: fraud_score, signals
 fraud_Score must be between 0.0 to 1.0 , 1.0 being highest
 signals should be a list of strings describing the fraud indicators
+review should be a string describing the review of the evidence (one-liner)
 Return valid JSON matching the EvidenceAnalysisSchema schema."""),
     ("human", "Evidence details: {messages}")
 ])

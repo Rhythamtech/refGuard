@@ -4,6 +4,7 @@ from typing import Optional
 from ..state import IntentOutput
 
 
+
 INTENT_RULES = [
     ("wrong_item", 0.97, "wrong_item_explicit",
      re.compile(

@@ -6,6 +6,7 @@ from decimal import Decimal
 class EvidenceAnalysisSchema(BaseModel):
     fraud_score: float
     signals: List[str]
+    review : str
 
 class IntentOutput(BaseModel):
     intent: str          
@@ -46,6 +47,7 @@ class RefundState(TypedDict):
     intent: Optional[Literal["refund", "exchange", "inquiry", "cancel"]]
     extracted_order_item_id: Optional[str]
     order_data: Optional[OrderData]
+    refund_request_id : Optional[int]
 
     # Eligibility
     is_eligible: Optional[bool]
@@ -59,6 +61,7 @@ class RefundState(TypedDict):
     # Decision
     decision: Optional[Literal["approve", "reject", "human_review"]]
     human_decision: Optional[Literal["approve", "reject"]]
+    review_id: Optional[int]          # refund_decision PK when decision=pending_review
 
     # Output
     refund_id: Optional[str]
