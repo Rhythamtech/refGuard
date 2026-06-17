@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from .state import RefundState
 from .nodes import (
     classify_intent_node,
@@ -95,6 +95,5 @@ workflow.add_edge("process_refund", "generate_response")
 workflow.add_edge("generate_response", END)
 workflow.add_edge("error", END)
 
-# Compile graph with MemorySaver checkpointer
-checkpointer = MemorySaver()
-graph = workflow.compile(checkpointer=checkpointer)
+# Export workflow for compilation with checkpointer
+__all__ = ["workflow"]
