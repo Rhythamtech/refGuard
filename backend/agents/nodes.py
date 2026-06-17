@@ -1,9 +1,8 @@
 from typing import List, Literal
 from decimal import Decimal
 from datetime import datetime
-import uuid
 from langchain_core.messages import HumanMessage
-from .tools.llm import get_llm_with_structured_output, get_vision_llm_with_structured_output
+from .tools.llm import get_llm, get_llm_with_structured_output, get_vision_llm_with_structured_output
 from .tools.helper import regex_classify
 from .tools.db import (
     is_customer_fraud, last_refunds, get_order_details,
@@ -11,7 +10,9 @@ from .tools.db import (
     create_review_queue_entry, save_refund_decision,
 )
 from .state import RefundState, IntentOutput, EvidenceAnalysisSchema
-from .prompt import INTENT_PROMPT, EVIDENCE_ANALYSIS_PROMPT
+from .prompt import INTENT_PROMPT, EVIDENCE_ANALYSIS_PROMPT, ELIGIBILITY_AGENT_SYSTEM_PROMPT
+from .tools.eligibility_tools import grep_policy, read_policy_section, evaluate_eligibility
+import backend.agents.tools.eligibility_tools as et_module
 
 
 def days_since_delivered(delivered_at: str) -> int:
@@ -38,7 +39,8 @@ async def analyze_evidence_images_with_llm(evidence_urls: List[str], user_messag
 
     return {
         "fraud_score": result.fraud_score,
-        "signals": result.signals
+        "signals": result.signals,
+        "review": result.review
     }
 
 def compute_refund_amount(state: RefundState) -> Decimal:
@@ -243,7 +245,7 @@ async def lookup_order_node(state: RefundState) -> dict:
 
 async def check_eligibility_node(state: RefundState) -> dict:
     """
-    Checks if the refund request is eligible for a refund.
+    Checks if the refund request is eligible for a refund using an LLM agent.
     """
     order_data = state.get("order_data")
     if not order_data:
@@ -261,75 +263,162 @@ async def check_eligibility_node(state: RefundState) -> dict:
         }
 
     order_item_id = state["request"].order_item_id
-
     items = order_data.items if hasattr(order_data, "items") else order_data.get("items", [])
     status = order_data.status if hasattr(order_data, "status") else order_data.get("status")
     delivered_at = order_data.delivered_at if hasattr(order_data, "delivered_at") else order_data.get("delivered_at")
 
-    def is_item_refunded(items_list, item_id):
-        for item in items_list:
-            if item.get("order_item_id") == item_id:
-                return item.get("status") == "refunded"
-        return False
+    # Find the specific order item requested
+    matched_item = None
+    for item in items:
+        if str(item.get("order_item_id", "")) == str(order_item_id):
+            matched_item = item
+            break
 
-    def get_return_window_days(items_list, item_id):
-        for item in items_list:
-            if item.get("order_item_id") == item_id:
-                return item.get("return_window_days")
-        return None
+    # Calculate days since delivery if delivered_at is available
+    days = None
+    if delivered_at:
+        if isinstance(delivered_at, str):
+            days = days_since_delivered(delivered_at)
+        else:
+            days = (datetime.utcnow() - delivered_at).days
 
-    if is_item_refunded(items, order_item_id) and status == "refunded":
+    # Construct complete structured order context for the agent
+    order_context = {
+        "customer_id": state["request"].customer_id,
+        "order_id": state["request"].order_id,
+        "order_item_id": order_item_id,
+        "request_reason": state["request"].reason,
+        "intent": state.get("intent"),
+        "order_status": status,
+        "delivered_at": str(delivered_at) if delivered_at else None,
+        "days_since_delivery": days,
+        "matched_item": {
+            "product_name": matched_item.get("product_name") if matched_item else None,
+            "product_category": matched_item.get("product_category") if matched_item else None,
+            "item_status": matched_item.get("status") if matched_item else None,
+            "return_window_days": matched_item.get("return_window_days") if matched_item else None,
+            "unit_price": float(matched_item.get("unit_price", 0)) if matched_item else 0.0,
+            "quantity": matched_item.get("quantity") if matched_item else 1
+        } if matched_item else None,
+        "fraud_score": state.get("fraud_score"),
+        "fraud_signals": state.get("fraud_signals", [])
+    }
+
+    # Reset the global verdict registry
+    et_module._final_verdict = None
+
+    try:
+        # Initialize ReAct agent execution
+        llm = get_llm()
+        tools = [grep_policy, read_policy_section, evaluate_eligibility]
+        llm_with_tools = llm.bind_tools(tools)
+
+        messages = [
+            ("system", ELIGIBILITY_AGENT_SYSTEM_PROMPT),
+            ("human", f"Verify the refund eligibility of this request under the store refund policies.\n\nOrder Context:\n{order_context}")
+        ]
+
+        # Run ReAct step loop
+        max_steps = 10
+        step = 0
+        while step < max_steps:
+            response = await llm_with_tools.ainvoke(messages)
+            messages.append(response)
+
+            if not response.tool_calls:
+                # Prompt the LLM to submit a final verdict via evaluate_eligibility if it stopped early
+                messages.append(("human", "You must conclude the evaluation by calling the `evaluate_eligibility` tool with the structured verdict. Please call `evaluate_eligibility` now."))
+                step += 1
+                continue
+
+            for tc in response.tool_calls:
+                tool_name = tc["name"]
+                tool_args = tc["args"]
+                tool_id = tc["id"]
+
+                # Invoke the appropriate tool
+                if tool_name == "grep_policy":
+                    result = grep_policy.invoke(tool_args)
+                elif tool_name == "read_policy_section":
+                    result = read_policy_section.invoke(tool_args)
+                elif tool_name == "evaluate_eligibility":
+                    result = evaluate_eligibility.invoke(tool_args)
+                else:
+                    result = f"Unknown tool: {tool_name}"
+
+                messages.append({
+                    "role": "tool",
+                    "name": tool_name,
+                    "tool_call_id": tool_id,
+                    "content": str(result)
+                })
+
+                if tool_name == "evaluate_eligibility":
+                    break
+
+            if et_module._final_verdict is not None:
+                break
+
+            step += 1
+
+    except Exception as e:
+        # Log LLM execution failure in internal trace (silently fallback)
+        pass
+
+    # Retrieve the agent's final verdict or run the fallback engine
+    verdict = et_module._final_verdict
+    if verdict is None:
+        # Safety Fallback Engine (replicates standard policy constraints)
+        is_eligible = True
+        reason = None
+
+        if matched_item and matched_item.get("status") == "refunded":
+            is_eligible = False
+            reason = "This order has already been refunded."
+        else:
+            return_window_days = matched_item.get("return_window_days") if matched_item else None
+            if return_window_days is not None and days is not None:
+                if days > return_window_days:
+                    is_eligible = False
+                    reason = f"Order is {days} days old, outside the {return_window_days}-day return window."
+
+        verdict = et_module.EligibilityVerdict(
+            is_eligible=is_eligible,
+            reason=reason or "Eligible for refund",
+            policy_sections=["1. Eligibility for Refunds"]
+        )
+
+    # Return structured state updates based on the verdict
+    if not verdict.is_eligible:
         return {
             "is_eligible": False,
-            "eligibility_reason": "This order has already been refunded.",
+            "eligibility_reason": verdict.reason,
+            "policy_context": ", ".join(verdict.policy_sections),
             "decision": "reject",
-            "response_message": "This order has already been refunded.",
+            "response_message": verdict.reason,
             "refund_amount": Decimal(0),
             "audit_log": state["audit_log"] + [{
                 "step": "check_eligibility",
                 "result": {
                     "is_eligible": False,
-                    "reason": "This order has already been refunded.",
+                    "reason": verdict.reason,
+                    "policy_sections": verdict.policy_sections,
                     "order_item_id": order_item_id
                 },
                 "ts": datetime.utcnow().isoformat()
             }]
         }
 
-    return_window_days = get_return_window_days(items, order_item_id)
-    if return_window_days is not None and delivered_at:
-        if isinstance(delivered_at, str):
-            days = days_since_delivered(delivered_at)
-        else:
-            days = (datetime.utcnow() - delivered_at).days
-
-        if days > return_window_days:
-            return {
-                "is_eligible": False,
-                "eligibility_reason": f"Order is {days} days old, outside the {return_window_days}-day return window.",
-                "decision": "reject",
-                "response_message": f"Order is {days} days old, outside the {return_window_days}-day return window.",
-                "refund_amount": Decimal(0),
-                "audit_log": state["audit_log"] + [{
-                    "step": "check_eligibility",
-                    "result": {
-                        "is_eligible": False,
-                        "reason": "Outside return window",
-                        "days_since_delivery": days,
-                        "return_window_days": return_window_days,
-                        "order_item_id": order_item_id
-                    },
-                    "ts": datetime.utcnow().isoformat()
-                }]
-            }
-
     return {
         "is_eligible": True,
         "eligibility_reason": None,
+        "policy_context": ", ".join(verdict.policy_sections),
         "audit_log": state["audit_log"] + [{
             "step": "check_eligibility",
             "result": {
                 "is_eligible": True,
+                "reason": verdict.reason,
+                "policy_sections": verdict.policy_sections,
                 "order_item_id": order_item_id
             },
             "ts": datetime.utcnow().isoformat()

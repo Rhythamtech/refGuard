@@ -1,9 +1,13 @@
 import re
+import subprocess
+import platform
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 from ..state import IntentOutput
 
 
+DOCS_DIR = Path("docs")
 
 INTENT_RULES = [
     ("wrong_item", 0.97, "wrong_item_explicit",
@@ -113,4 +117,50 @@ def regex_classify(message: str) -> Optional[IntentOutput]:
     return None 
 
 
+
+def _is_windows() -> bool:
+    return platform.system() == "Windows"
+
+
+def grep(pattern: str, max_results: int = 5) -> list[str]:
+    if _is_windows():
+        # findstr on Windows: /S=recursive, /N=line numbers, /I=ignore case, /M- show lines
+        cmd = ["findstr", "/S", "/N", "/I", pattern, str(DOCS_DIR / "*.md")]
+    else:
+        # grep on Unix: -r=recursive, -n=line numbers, -i=ignore case, -m per-file limit
+        cmd = ["grep", "-r", "-n", "-i", "--include=*.md", f"-m{max_results}", pattern, str(DOCS_DIR)]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    lines = result.stdout.strip().splitlines()
+    return lines[:max_results]
+
+
+def read_slice_doc(path: str, start_line: int, end_line: int) -> str:
+    file_path = DOCS_DIR / Path(path)
+
+    if _is_windows():
+        # PowerShell: Get-Content with line range
+        ps_cmd = (
+            f"Get-Content '{file_path}' | "
+            f"Select-Object -Index ({start_line - 1}..{end_line - 1})"
+        )
+        cmd = ["powershell", "-Command", ps_cmd]
+    else:
+        # sed: print lines from start to end (1-based, inclusive)
+        cmd = ["sed", "-n", f"{start_line},{end_line}p", str(file_path)]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    return result.stdout.strip()
+
+
+def read_doc(path: str) -> str:
+    file_path = DOCS_DIR / Path(path)
+
+    if _is_windows():
+        cmd = ["powershell", "-Command", f"Get-Content '{file_path}'"]
+    else:
+        cmd = ["cat", str(file_path)]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+    return result.stdout.strip()
 

@@ -1,7 +1,5 @@
-from sqlite3 import Cursor
 import pathlib
 import sqlite3
-from pydantic import BaseModel
 
 class SqliteOrderDB:
     """
