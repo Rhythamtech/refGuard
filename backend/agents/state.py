@@ -10,8 +10,8 @@ class EvidenceAnalysisSchema(BaseModel):
 
 class IntentOutput(BaseModel):
     intent: str          
-    order_item_id: str | None
-    order_id: str | None
+    order_item_id: str | None = None
+    order_id: str | None = None
     reason_category: str 
     confidence: float
 

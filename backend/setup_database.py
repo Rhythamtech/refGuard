@@ -1,5 +1,6 @@
 import pathlib
 import sqlite3
+from datetime import datetime
 
 class SqliteOrderDB:
     """
@@ -18,6 +19,8 @@ class SqliteOrderDB:
         """Return a connection to the SQLite database."""
         db_path = pathlib.Path(__file__).parent.parent / "mock.db"
         self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.create_function("now", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.cursor = self.conn.cursor()
 
         self.conn.commit()

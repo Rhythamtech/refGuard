@@ -10,13 +10,11 @@ from pydantic import BaseModel, Field
 from . import helper
 helper.DOCS_DIR = Path(__file__).parent.parent.parent
 
-# Define a Pydantic class for the final decision output
 class EligibilityVerdict(BaseModel):
     is_eligible: bool = Field(description="Whether the customer/item is eligible for a refund according to policy")
     reason: str = Field(description="Detailed reason explaining the decision citing specific policy sections")
     policy_sections: List[str] = Field(description="List of policy sections referenced (e.g., '1. Eligibility for Refunds', '3. Non-Refundable Items')")
 
-# Global storage for the final result
 _final_verdict: Optional[EligibilityVerdict] = None
 
 @tool

@@ -19,7 +19,7 @@ def is_customer_fraud(customer_id: str) -> bool:
     cursor.execute(query_string, (customer_id,))
     result = cursor.fetchone()
 
-    if result is None:
+    if result is None or result[0] == 0:
         return False
     
     return True
@@ -113,11 +113,11 @@ def get_order_details(order_id: str):
 
     query_item_string = """
         SELECT 
-            id as order_item_id,
+            oi.id as order_item_id,
             unit_price,
             quantity,
             item_status AS status,
-            p.name AS product_name,
+            p.title AS product_name,
             p.category AS product_category,
             p.return_window_days AS return_window_days
         FROM order_items oi
@@ -145,11 +145,15 @@ def get_order_details(order_id: str):
     return result_dict
 
 def create_refund_request(order_id: str, customer_id : str,order_item_id: str, reason: str , intent:str):
+    cursor.execute("SELECT total_price FROM order_items WHERE id = ?", (order_item_id,))
+    row = cursor.fetchone()
+    amount = row["total_price"] if row else 0.0
+
     query = """
-        INSERT INTO refund_request (order_id, customer_id, order_item_id, reason, reason_category)
+        INSERT INTO refund_request (customer_id, order_item_id, reason, reason_category, requested_refund_amount)
         VALUES (?, ?, ?, ?, ?)
     """
-    cursor.execute(query, (order_id, customer_id, order_item_id, reason, intent))
+    cursor.execute(query, (customer_id, order_item_id, reason, intent, amount))
     conn.commit()
 
     return cursor.lastrowid

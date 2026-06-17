@@ -34,14 +34,21 @@ async def analyze_evidence_images_with_llm(evidence_urls: List[str], user_messag
 
     message = HumanMessage(content=messages)
 
-    chain = EVIDENCE_ANALYSIS_PROMPT | get_vision_llm_with_structured_output(EvidenceAnalysisSchema) 
-    result = await chain.ainvoke(message)
+    try:
+        chain = EVIDENCE_ANALYSIS_PROMPT | get_vision_llm_with_structured_output(EvidenceAnalysisSchema)
+        result = await chain.ainvoke(message)
 
-    return {
-        "fraud_score": result.fraud_score,
-        "signals": result.signals,
-        "review": result.review
-    }
+        return {
+            "fraud_score": result.fraud_score,
+            "signals": result.signals,
+            "review": result.review
+        }
+    except Exception:
+        return {
+            "fraud_score": 0.5,
+            "signals": ["vision_analysis_unavailable"],
+            "review": "Evidence analysis failed due to service unavailability."
+        }
 
 def compute_refund_amount(state: RefundState) -> Decimal:
     """
@@ -53,7 +60,7 @@ def compute_refund_amount(state: RefundState) -> Decimal:
     if not order_data:
         return Decimal(0)
 
-    items = order_data.items if hasattr(order_data, "items") else order_data.get("items", [])
+    items = order_data.get("items", [])
     for item in items:
         item_id = str(item.get("order_item_id", ""))
         if item_id == str(order_item_id):
@@ -73,11 +80,19 @@ async def classify_intent_node(state: RefundState) -> dict:
     if regex_intent is not None:
         result = regex_intent
     else:
-        chain = INTENT_PROMPT | get_llm_with_structured_output(IntentOutput)
-        result = await chain.ainvoke({
-            "message": state["request"].reason,
-            "context": f"order_item_id hint: {state['request'].order_item_id}"
-        })
+        try:
+            chain = INTENT_PROMPT | get_llm_with_structured_output(IntentOutput)
+            result = await chain.ainvoke({
+                "message": state["request"].reason,
+                "context": f"order_item_id hint: {state['request'].order_item_id}"
+            })
+        except Exception:
+            result = IntentOutput(
+                intent="request_refund",
+                confidence=0.5,
+                reason_category="fallback_generic",
+                order_id=None
+            )
 
     intent = result.intent
     order_item_id = result.order_item_id or state["request"].order_item_id
@@ -188,7 +203,7 @@ async def lookup_order_node(state: RefundState) -> dict:
     """
     Looks up order data in the database.
     """
-    if state["order_data"] is not None:
+    if state.get("order_data") is not None:
         return {
             "audit_log": state["audit_log"] + [{
                 "step": "lookup_order",
@@ -263,9 +278,9 @@ async def check_eligibility_node(state: RefundState) -> dict:
         }
 
     order_item_id = state["request"].order_item_id
-    items = order_data.items if hasattr(order_data, "items") else order_data.get("items", [])
-    status = order_data.status if hasattr(order_data, "status") else order_data.get("status")
-    delivered_at = order_data.delivered_at if hasattr(order_data, "delivered_at") else order_data.get("delivered_at")
+    items = order_data.get("items", [])
+    status = order_data.get("status")
+    delivered_at = order_data.get("delivered_at")
 
     # Find the specific order item requested
     matched_item = None
@@ -478,7 +493,7 @@ async def process_refund_node(state: RefundState) -> dict:
             
 
     refund_decision_id = save_refund_decision(
-        refund_request_id=int(state["request"].order_item_id),
+        refund_request_id=int(state["refund_request_id"]),
         review=evidence_review,
         amount=float(refund_amount),
     )
