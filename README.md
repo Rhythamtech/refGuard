@@ -16,15 +16,18 @@ The application is structured into four functional layers:
 
 ## Agent Workflow (LangGraph State Machine)
 
-The refund evaluation follows a deterministic, stateful workflow modeled in `backend/agents/graph.py`:
+The evaluation follows a deterministic, stateful workflow modeled in `backend/agents/graph.py`:
 
 ```mermaid
 flowchart TD
     START([Start]) --> classify_intent[Classify Intent]
     classify_intent --> lookup_order[Lookup Order]
     
-    lookup_order -->|Order Found| check_eligibility[Check Eligibility]
+    lookup_order -->|Refund Intent| check_eligibility[Check Eligibility]
+    lookup_order -->|Support / Unrelated| general_support[General Support]
     lookup_order -->|Order Missing / Error| error[Error Handler]
+    
+    general_support --> END([End])
     
     check_eligibility -->|Eligible| fraud_detection[Fraud Detection]
     check_eligibility -->|Not Eligible| generate_response[Generate Response]
@@ -36,18 +39,58 @@ flowchart TD
     human_review --> generate_response
     process_refund --> generate_response
     
-    generate_response --> END([End])
+    generate_response --> END
     error --> END
 ```
 
 ### Flow Node Descriptions:
-- **Classify Intent**: Analyzes customer free-text query to extract the intent category and targets.
-- **Lookup Order**: Retrieves order, item metadata, and delivery dates from the SQLite database.
+- **Classify Intent**: Analyzes customer free-text query to extract the intent category (`refund_related`, `general_support`, or `unrelated`).
+- **Lookup Order**: Retrieves order and customer metadata from the SQLite database.
+- **General Support**: Handles non-refund queries like order status, tracking, ETA, and payment info. Includes strict guardrails to prevent unrelated conversation drift (e.g., coding help, roleplay).
 - **Check Eligibility**: Cross-references order timelines and items against `refund-policy.md` utilizing RAG/grep tools.
 - **Fraud Detection**: Computes a fraud score based on customer history, duplicate attempts, and evidence validation.
 - **Process Refund**: Dynamically calculates the final credit amount and writes approved refund decisions.
 - **Human Review**: Marks suspicious or boundary claims as `pending_review` in the database to be resolved by support agents.
 - **Generate Response**: Constructs context-appropriate, customer-friendly status messages.
+
+---
+
+## Frontend Application Flow
+
+The frontend is a React-based Single Page Application (SPA) that provides tailored experiences for customers and administrative staff.
+
+### 1. Authentication & Routing
+- **Login**: A unified login page handles both customers and admin users via JWT-based authentication.
+- **Conditional Views**:
+    - **Customers**: Redirected to the `CustomerChat` portal for real-time support and refund requests.
+    - **Admin Staff**: Redirected to the `AdminDashboard` for system monitoring and manual decision overrides.
+
+### 2. Customer Portal (`CustomerChat`)
+- **Real-time Interaction**: A chat-based interface for interacting with the AI agents.
+- **Support Requests**: Users can inquire about order status or submit refund claims with evidence.
+- **Order History**: Allows selection of specific order items for precise intent classification.
+
+### 3. Admin Dashboard (`AdminDashboard`)
+The admin interface is organized into three primary views:
+- **Overview**:
+    - **KPIs**: Displays real-time metrics including Auto-Approval Success Rate, Average Resolution Speed, and Total Decisions.
+    - **Live Decision Logs**: A streaming feed of AI-generated decisions and reasoning audits.
+    - **Review Queue Snippet**: Quick access to the most urgent pending reviews.
+- **Queue Tasks**:
+    - **Manual Override**: Lists all refund requests flagged for human review.
+    - **Fraud Analysis**: Displays fraud scores and specific signals (e.g., "high frequency", "duplicate claim") to aid in decision-making.
+    - **Decision Controls**: Allows staff to Approve or Reject claims, which immediately updates the customer's status.
+- **AI Logs**:
+    - **Audit Trail**: A comprehensive, searchable table of all system-processed refund requests, decisions, and detailed LLM reasoning audits.
+
+---
+
+## Support Guardrails & Intent Handling
+
+To maintain system focus and efficiency, the assistant employs multi-layer guardrails:
+1. **Intent Classification**: Every query is categorized. Non-e-commerce intents (coding, stories, personal advice) are flagged as `unrelated`.
+2. **Conversation Drift Protection**: The `general_support` node tracks an `unrelated_msg_count`. If a user persists in off-topic discussion, the assistant becomes increasingly firm in redirecting them to order assistance.
+3. **Information Siloing**: Refund logic is strictly decoupled from general support. Refund-related keywords always trigger the specialized audit pipeline.
 
 ---
 

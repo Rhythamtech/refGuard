@@ -1,16 +1,20 @@
 from typing import List, Literal
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from langchain_core.messages import HumanMessage
 from .tools.llm import get_llm, get_llm_with_structured_output, get_vision_llm_with_structured_output
-from .tools.helper import regex_classify
+from .tools.helper import regex_classify, check_regex_guardrails
 from .tools.db import (
     is_customer_fraud, last_refunds, get_order_details,
     get_account_age_days, check_duplicate_refund, create_refund_request,
-    create_review_queue_entry, save_refund_decision,
+    create_review_queue_entry, save_refund_decision, get_customer_profile,
+    save_refund_rejection, save_fraud_history,
 )
 from .state import RefundState, IntentOutput, EvidenceAnalysisSchema
-from .prompt import INTENT_PROMPT, EVIDENCE_ANALYSIS_PROMPT, ELIGIBILITY_AGENT_SYSTEM_PROMPT
+from .prompt import (
+    INTENT_PROMPT, EVIDENCE_ANALYSIS_PROMPT, ELIGIBILITY_AGENT_SYSTEM_PROMPT,
+    GENERAL_SUPPORT_PROMPT,
+)
 from .tools.eligibility_tools import grep_policy, read_policy_section, evaluate_eligibility
 import backend.agents.tools.eligibility_tools as et_module
 
@@ -19,8 +23,8 @@ def days_since_delivered(delivered_at: str) -> int:
     """
     Returns the number of days since the order was delivered.
     """
-    delivered_date = datetime.strptime(delivered_at, "%Y-%m-%d %H:%M:%S")
-    return (datetime.utcnow() - delivered_date).days
+    delivered_date = datetime.strptime(delivered_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - delivered_date).days
 
 async def analyze_evidence_images_with_llm(evidence_urls: List[str], user_message: str)->dict:
     """
@@ -73,7 +77,7 @@ def compute_refund_amount(state: RefundState) -> Decimal:
 # Nodes 
 async def classify_intent_node(state: RefundState) -> dict:
     """
-    Classifies the intent of the refund request.
+    Classifies the intent of the request.
     """
     regex_intent = regex_classify(state["request"].reason)
     
@@ -88,33 +92,45 @@ async def classify_intent_node(state: RefundState) -> dict:
             })
         except Exception:
             result = IntentOutput(
-                intent="request_refund",
+                intent="refund_related",
                 confidence=0.5,
                 reason_category="fallback_generic",
                 order_id=None
             )
 
-    intent = result.intent
+    intent_type = result.intent
+    # Map specific labels to high-level types if LLM didn't do it
+    if intent_type in ["wrong_item", "missing_item", "damaged", "quality", "refund_inquiry", "request_refund", "cancel_order", "late_delivery"]:
+        intent_type = "refund_related"
+    
     order_item_id = result.order_item_id or state["request"].order_item_id
     
-    refund_request_id = create_refund_request(
-        order_id=state["request"].order_id,
-        customer_id=state["request"].customer_id,
-        order_item_id=order_item_id,
-        reason=state["request"].reason,
-        intent=intent
-    )
+    unrelated_count = state.get("unrelated_msg_count", 0)
+    if intent_type == "unrelated":
+        unrelated_count += 1
+
+    # Only create refund_request in DB if it's actually refund related
+    refund_request_id = state.get("refund_request_id")
+    if intent_type == "refund_related":
+        refund_request_id = create_refund_request(
+            order_id=state["request"].order_id,
+            customer_id=state["request"].customer_id,
+            order_item_id=order_item_id,
+            reason=state["request"].reason,
+            intent=result.intent # use specific label for DB
+        )
     
     return {
         "refund_request_id": refund_request_id,
-        "intent": intent,
+        "intent": intent_type,
         "extracted_order_item_id": order_item_id,
+        "unrelated_msg_count": unrelated_count,
         "audit_log": state["audit_log"] + [{
             "step": "classify_intent",
             "result": result.dict(),
-            "ts": datetime.utcnow().isoformat()
+            "ts": datetime.now(timezone.utc).isoformat()
         }]
-    }   
+    }
 
 async def fraud_detection_node(state: RefundState) -> dict: 
     """
@@ -133,7 +149,7 @@ async def fraud_detection_node(state: RefundState) -> dict:
                 "step": "fraud_detection", "result": {
                     "is_fraud": False, "reason": "customer_id or order_id is None"
                 },
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }   
 
@@ -141,6 +157,14 @@ async def fraud_detection_node(state: RefundState) -> dict:
 
     if is_fraud:
         fraud_score += 1
+
+        refund_req_id = state.get("refund_request_id")
+        if refund_req_id:
+            save_fraud_history(
+                refund_request_id=int(refund_req_id),
+                fraud_score=float(fraud_score),
+                flagged_rules=signals,
+            )
 
         return {
             "fraud_score": fraud_score,
@@ -150,7 +174,7 @@ async def fraud_detection_node(state: RefundState) -> dict:
                 "step": "fraud_detection", "result": {
                     "is_fraud": True, "reason": "customer is fraudulent"
                 },
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }   
     
@@ -185,6 +209,14 @@ async def fraud_detection_node(state: RefundState) -> dict:
         fraud_score = min(fraud_score, 1.0)
         decision = "approve" if fraud_score < 0.3 else ("human_review" if fraud_score < 0.7 else "reject")
 
+        refund_req_id = state.get("refund_request_id")
+        if refund_req_id:
+            save_fraud_history(
+                refund_request_id=int(refund_req_id),
+                fraud_score=float(fraud_score),
+                flagged_rules=signals,
+            )
+
         return {
             "fraud_score": fraud_score,
             "fraud_signals": signals,
@@ -195,7 +227,7 @@ async def fraud_detection_node(state: RefundState) -> dict:
                     "signals": signals,
                     "decision": decision
                 },
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }   
 
@@ -208,7 +240,7 @@ async def lookup_order_node(state: RefundState) -> dict:
             "audit_log": state["audit_log"] + [{
                 "step": "lookup_order",
                 "result": {"success": True, "cached": True, "order_id": state["request"].order_id},
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }
 
@@ -224,7 +256,7 @@ async def lookup_order_node(state: RefundState) -> dict:
                 "audit_log": state["audit_log"] + [{
                     "step": "lookup_order",
                     "result": {"success": False, "reason": "Order not found", "order_id": state["request"].order_id},
-                    "ts": datetime.utcnow().isoformat()
+                    "ts": datetime.now(timezone.utc).isoformat()
                 }]
             }
 
@@ -234,7 +266,7 @@ async def lookup_order_node(state: RefundState) -> dict:
             "audit_log": state["audit_log"] + [{
                 "step": "lookup_order",
                 "result": {"success": False, "error": str(e), "order_id": state["request"].order_id},
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }
 
@@ -254,7 +286,7 @@ async def lookup_order_node(state: RefundState) -> dict:
                 "total_amount": float(total_amount) if total_amount is not None else None,
                 "status": status
             },
-            "ts": datetime.utcnow().isoformat()
+            "ts": datetime.now(timezone.utc).isoformat()
         }]
     }
 
@@ -273,7 +305,7 @@ async def check_eligibility_node(state: RefundState) -> dict:
             "audit_log": state["audit_log"] + [{
                 "step": "check_eligibility",
                 "result": {"is_eligible": False, "reason": "Order not found or not loaded"},
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }
 
@@ -281,6 +313,26 @@ async def check_eligibility_node(state: RefundState) -> dict:
     items = order_data.get("items", [])
     status = order_data.get("status")
     delivered_at = order_data.get("delivered_at")
+
+    if status == "shipped":
+        return {
+            "is_eligible": False,
+            "eligibility_reason": "Orders that are currently in 'shipped' status cannot be refunded until they are delivered.",
+            "policy_context": "1. Eligibility for Refunds",
+            "decision": "reject",
+            "response_message": "We're unable to process your refund request because your order is currently shipped and in transit. Please wait for delivery before requesting a refund.",
+            "refund_amount": Decimal(0),
+            "audit_log": state["audit_log"] + [{
+                "step": "check_eligibility",
+                "result": {
+                    "is_eligible": False,
+                    "reason": "Order is currently shipped (in transit)",
+                    "policy_sections": ["1. Eligibility for Refunds"],
+                    "order_item_id": order_item_id
+                },
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
 
     # Find the specific order item requested
     matched_item = None
@@ -295,7 +347,7 @@ async def check_eligibility_node(state: RefundState) -> dict:
         if isinstance(delivered_at, str):
             days = days_since_delivered(delivered_at)
         else:
-            days = (datetime.utcnow() - delivered_at).days
+            days = (datetime.now(timezone.utc) - delivered_at).days
 
     # Construct complete structured order context for the agent
     order_context = {
@@ -420,7 +472,7 @@ async def check_eligibility_node(state: RefundState) -> dict:
                     "policy_sections": verdict.policy_sections,
                     "order_item_id": order_item_id
                 },
-                "ts": datetime.utcnow().isoformat()
+                "ts": datetime.now(timezone.utc).isoformat()
             }]
         }
 
@@ -436,7 +488,7 @@ async def check_eligibility_node(state: RefundState) -> dict:
                 "policy_sections": verdict.policy_sections,
                 "order_item_id": order_item_id
             },
-            "ts": datetime.utcnow().isoformat()
+            "ts": datetime.now(timezone.utc).isoformat()
         }]
     }
 
@@ -453,27 +505,29 @@ async def human_review_node(state: RefundState) -> dict:
     fraud_score = state.get("fraud_score") or 0.0
     fraud_signals = state.get("fraud_signals") or []
 
+    current_audit_log = state["audit_log"] + [{
+        "step": "human_review",
+        "result": {
+            "fraud_score": fraud_score,
+            "fraud_signals": fraud_signals,
+            "order_id": order_id,
+            "order_item_id": order_item_id,
+            "customer_id": customer_id,
+        },
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }]
+
     review_id = create_review_queue_entry(
         refund_request_id=int(state["refund_request_id"]),
         fraud_score=fraud_score,
         signals=fraud_signals,
+        audit_log=current_audit_log,
     )
 
     return {
         "decision": "human_review",
         "review_id": review_id,
-        "audit_log": state["audit_log"] + [{
-            "step": "human_review",
-            "result": {
-                "review_id": review_id,
-                "fraud_score": fraud_score,
-                "fraud_signals": fraud_signals,
-                "order_id": order_id,
-                "order_item_id": order_item_id,
-                "customer_id": customer_id,
-            },
-            "ts": datetime.utcnow().isoformat(),
-        }],
+        "audit_log": current_audit_log,
     }
 
 
@@ -492,10 +546,20 @@ async def process_refund_node(state: RefundState) -> dict:
         evidence_review = evidence_result["review"]
             
 
+    current_audit_log = state["audit_log"] + [{
+        "step": "process_refund",
+        "result": {
+            "review": evidence_review,
+            "refund_amount": float(refund_amount),
+        },
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }]
+
     refund_decision_id = save_refund_decision(
         refund_request_id=int(state["refund_request_id"]),
         review=evidence_review,
         amount=float(refund_amount),
+        audit_log=current_audit_log,
     )
 
     return {
@@ -505,15 +569,7 @@ async def process_refund_node(state: RefundState) -> dict:
             f"Your refund of ₹{refund_amount:.2f} has been approved. "
             "It will be credited to your original payment method within 5–10 business days."
         ),
-        "audit_log": state["audit_log"] + [{
-            "step": "process_refund",
-            "result": {
-                "refund_id": refund_decision_id,
-                "review": evidence_review,
-                "refund_amount": float(refund_amount),
-            },
-            "ts": datetime.utcnow().isoformat(),
-        }],
+        "audit_log": current_audit_log,
     }
 
 
@@ -552,13 +608,72 @@ async def generate_response_node(state: RefundState) -> dict:
             "If you believe this is an error, please contact our support team."
         )
 
+        refund_req_id = state.get("refund_request_id")
+        if refund_req_id:
+            current_audit_log = state["audit_log"] + [{
+                "step": "generate_response",
+                "result": {"decision": decision, "message": message},
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }]
+            save_refund_rejection(
+                refund_request_id=int(refund_req_id),
+                review=reason,
+                audit_log=current_audit_log,
+            )
+
     return {
         "response_message": message,
         "audit_log": state["audit_log"] + [{
             "step": "generate_response",
             "result": {"decision": decision, "message": message},
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
         }],
+    }
+
+
+async def general_support_node(state: RefundState) -> dict:
+    """
+    Handles general customer support queries with guardrails.
+    """
+    query = state["request"].reason or ""
+
+    if check_regex_guardrails(query):
+        refusal_message = (
+            "I can only assist with e-commerce-related queries, including order status, delivery updates, "
+            "product information, account support, and refund requests. If you need help with any of these, "
+            "I'll be happy to assist. Unfortunately, I cannot help with topics outside of customer support."
+        )
+        return {
+            "response_message": refusal_message,
+            "decision": "support",
+            "audit_log": state["audit_log"] + [{
+                "step": "general_support",
+                "result": {"message": refusal_message, "refused": True},
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
+
+    customer_data = get_customer_profile(state["request"].customer_id)
+    
+    chain = GENERAL_SUPPORT_PROMPT | get_llm()
+    
+    response = await chain.ainvoke({
+        "order_data": state.get("order_data"),
+        "customer_data": customer_data,
+        "unrelated_msg_count": state.get("unrelated_msg_count", 0),
+        "query": query
+    })
+    
+    message = response.content
+
+    return {
+        "response_message": message,
+        "decision": "support",
+        "audit_log": state["audit_log"] + [{
+            "step": "general_support",
+            "result": {"message": message},
+            "ts": datetime.now(timezone.utc).isoformat()
+        }]
     }
 
 
@@ -581,6 +696,6 @@ async def error_node(state: RefundState) -> dict:
         "audit_log": state["audit_log"] + [{
             "step": "error",
             "result": {"internal_error": internal_error},
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
         }],
     }

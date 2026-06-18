@@ -9,6 +9,7 @@ from .nodes import (
     human_review_node,
     process_refund_node,
     generate_response_node,
+    general_support_node,
     error_node,
 )
 
@@ -16,8 +17,16 @@ from .nodes import (
 def route_after_lookup(state: RefundState) -> str:
     if state.get("error"):
         return "error"
+    
+    # Even if order_data is missing, general_support might want to answer.
+    # But for refund_related, we definitely need order_data.
+    intent = state.get("intent")
+    if intent in ["general_support", "unrelated"]:
+        return "general_support"
+
     if not state.get("order_data"):
         return "error"
+        
     return "check_eligibility"
 
 def route_after_eligibility(state: RefundState) -> str:
@@ -50,6 +59,7 @@ workflow.add_node("fraud_detection", fraud_detection_node)
 workflow.add_node("human_review", human_review_node)
 workflow.add_node("process_refund", process_refund_node)
 workflow.add_node("generate_response", generate_response_node)
+workflow.add_node("general_support", general_support_node)
 workflow.add_node("error", error_node)
 
 # Wire the nodes
@@ -62,9 +72,12 @@ workflow.add_conditional_edges(
     route_after_lookup,
     {
         "error": "error",
-        "check_eligibility": "check_eligibility"
+        "check_eligibility": "check_eligibility",
+        "general_support": "general_support"
     }
 )
+
+workflow.add_edge("general_support", END)
 
 workflow.add_conditional_edges(
     "check_eligibility",

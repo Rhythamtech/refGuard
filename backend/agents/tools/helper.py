@@ -102,7 +102,51 @@ INTENT_RULES = [
          r"late (aa raha|hua|ho gaya)|der se)\b",
          re.IGNORECASE
      )),
+
+    # ── GENERAL SUPPORT
+    ("general_support", 0.95, "order_status",
+     re.compile(
+         r"\b(status|track(ing)?|where is my (order|package)|when will it arrive|ETA|delivery (date|time)|order details|view my order|payment status|how to pay|product info|details about)\b",
+         re.IGNORECASE
+     )),
+
+    # ── UNRELATED
+    ("unrelated", 0.95, "unrelated_drift",
+     re.compile(
+         r"\b(hello|hi|how are you|what is your name|can you code|tell me a story|roleplay|joke|weather|news|personal advice|python script|reverse a string|write a function)\b",
+         re.IGNORECASE
+     )),
 ]
+
+
+ROLEPLAY_PATTERN = re.compile(
+    r"\b(roleplay|role-play|pretend|act as|simulate|ignore (previous |all )?instructions|you are now|hypothetical|persona|jailbreak|dan|system prompt|override|developer mode|dev mode|bypass)\b",
+    re.IGNORECASE
+)
+CODING_PATTERN = re.compile(
+    r"\b(code|coding|programmer|developer|programming|write a (function|script|program|class|method|query|snippet|macro)|html|css|python|javascript|js|java|c\+\+|c#|rust|golang|ruby|php|sql|compile|syntax|regex|import|export|function\s+\w+|const\s+\w+|let\s+\w+|var\s+\w+|def\s+\w+|console\.log|print\(|system\.out\.print|public class|div|span|href|class=)\b|\b(git|github|docker|api|endpoint|json|xml|yaml|csv)\b",
+    re.IGNORECASE
+)
+PERSONAL_ADVICE_PATTERN = re.compile(
+    r"\b(relationship(s)?|dating|love|marriage|divorce|boyfriend|girlfriend|husband|wife|friend(s)?|career|job|life|personal|financial|medical|legal|health|investment|stock(s)?|crypto|money|advice|tips|what should i do|help me choose|opinion on)\b",
+    re.IGNORECASE
+)
+CASUAL_CHAT_PATTERN = re.compile(
+    r"\b(how are you|what'?s up|how'?s it going|joke(s)?|weather|news|favorite|do you like|story|stories|gossip|riddle(s)?|trivia|fun fact(s)?|who are you|what are you|who created you|are you human|are you real|sentient|bot|ai|robot)\b|^(hi|hello|hey|greetings|sup|yo|g'day)\??$",
+    re.IGNORECASE
+)
+
+def check_regex_guardrails(query: str) -> bool:
+    """
+    Returns True if the query triggers any of the strict regex guardrails
+    for unrelated queries (roleplay, coding, personal advice, casual chat).
+    """
+    return bool(
+        ROLEPLAY_PATTERN.search(query) or
+        CODING_PATTERN.search(query) or
+        PERSONAL_ADVICE_PATTERN.search(query) or
+        CASUAL_CHAT_PATTERN.search(query)
+    )
 
 
 def regex_classify(message: str) -> Optional[IntentOutput]:

@@ -13,6 +13,7 @@ A refund request may be submitted only if the product or service is eligible und
 - If no refund window is stated for a product or service, that item is considered non-refundable unless required otherwise by law.
 - The customer must provide a valid order ID, purchase date, and proof of purchase.
 - The request must relate to a genuine issue covered by this policy.
+- Orders with a delivery status of 'shipped' (in transit) are not eligible for refunds. A refund request can only be evaluated after the order is fully delivered.
 
 ## 2. Refund Window
 

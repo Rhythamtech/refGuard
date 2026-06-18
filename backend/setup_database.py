@@ -18,7 +18,7 @@ class SqliteOrderDB:
     def connect_to_db(self):
         """Return a connection to the SQLite database."""
         db_path = pathlib.Path(__file__).parent.parent / "mock.db"
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.create_function("now", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         self.cursor = self.conn.cursor()
@@ -35,7 +35,7 @@ class SqliteOrderDB:
     def setup_db(self):
         """Setup the database."""
         if self.queries.strip():
-            self.cursor.execute(self.queries)
+            self.cursor.executescript(self.queries)
         self.conn.commit()
 
 if "__main__" == __name__:

@@ -1,165 +1,350 @@
 import sys
 from pathlib import Path
-import asyncio
+from typing import List, Optional, Literal
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timedelta
+import hashlib
 
-# Adjust Python path to allow running directly from workspace root
+# Ensure backend and root are in the sys.path so imports resolve correctly
 sys.path.append(str(Path(__file__).parent.parent))
 sys.path.append(str(Path(__file__).parent))
+
+from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from pydantic import BaseModel, EmailStr
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from backend.agents.graph import workflow
 from backend.agents.state import RefundRequest
-from backend.agents.tools.db import cursor, conn
+from backend.agents.tools.db import (
+    get_customer_by_email,
+    get_admin_by_email,
+    get_customer_profile,
+    get_customer_orders,
+    get_order_details,
+    get_customer_refund_history,
+    get_review_queue,
+    get_refund_logs,
+    get_admin_stats,
+    get_all_customers_summary,
+    resolve_review_decision,
+    save_refund_decision
+)
 
-def print_result(case_title: str, final_state: dict):
-    print("=" * 60)
-    print(f"CASE: {case_title}")
-    print("=" * 60)
-    print(f"Final Decision:   {final_state.get('decision')}")
-    print(f"Is Eligible:      {final_state.get('is_eligible')}")
-    print(f"Eligibility Rsn:  {final_state.get('eligibility_reason')}")
-    print(f"Policy Context:   {final_state.get('policy_context')}")
-    print(f"Fraud Score:      {final_state.get('fraud_score')}")
-    print(f"Fraud Signals:    {final_state.get('fraud_signals')}")
-    print(f"Refund Amount:    {final_state.get('refund_amount')}")
-    print(f"Response Msg:     {final_state.get('response_message')}")
-    print("Audit Log Steps:")
-    for entry in final_state.get("audit_log", []):
-        step_name = entry.get('step')
-        result_info = entry.get('result')
-        print(f" - {step_name} -> {result_info}")
-    print("-" * 60)
-    print()
+# JWT Constants
+SECRET_KEY = "refund-guard-secret-key-12345!"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
 
-async def run_case(graph, case_title: str, request: RefundRequest):
-    config = {"configurable": {"thread_id": case_title}}
+from contextlib import asynccontextmanager
+
+compiled_graph = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global compiled_graph
+    async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
+        app.state.checkpointer = checkpointer
+        compiled_graph = workflow.compile(checkpointer=checkpointer)
+        app.state.graph = compiled_graph
+        yield
+
+app = FastAPI(title="Refund Guard AI API", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origin_regex="https?://.*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+# JWT helper functions
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def decode_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    return decode_token(token)
+
+def get_current_customer(user: dict = Depends(get_current_user)):
+    if user.get("role") != "customer":
+        raise HTTPException(status_code=403, detail="Not authorized as a customer")
+    return user
+
+def get_current_admin(user: dict = Depends(get_current_user)):
+    if user.get("role") not in ["admin", "supervisor", "agent"]:
+        raise HTTPException(status_code=403, detail="Not authorized as an admin staff")
+    return user
+
+
+# Pydantic Schemas
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    role: str
+    name: str
+    id: int
+
+class SubmitRefundPayload(BaseModel):
+    order_id: str
+    order_item_id: str
+    reason: str
+    evidence_urls: List[str] = []
+
+class RefundSubmissionResponse(BaseModel):
+    refund_request_id: int
+    decision: str
+    refund_amount: float
+    message: str
+    review_id: Optional[int] = None
+
+class QueueDecisionRequest(BaseModel):
+    decision: Literal["approved", "rejected"]
+
+# Routes
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
+@app.post("/auth/customer/login", response_model=TokenResponse)
+def customer_login(payload: LoginRequest):
+    user = get_customer_by_email(payload.email)
+    # Support both raw password comparison and MD5 hash comparison
+    password_match = False
+    if user:
+        db_hash = user.get("password_hash")
+        input_hash = hashlib.md5(payload.password.encode()).hexdigest()
+        if db_hash == payload.password or db_hash == input_hash:
+            password_match = True
+            
+    if not user or not password_match:
+        raise HTTPException(status_code=400, detail="Invalid email or password")
+    
+    access_token = create_access_token(
+        data={"sub": str(user["id"]), "role": "customer", "email": user["email"]}
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "role": "customer",
+        "name": user["full_name"],
+        "id": user["id"]
+    }
+
+
+@app.post("/auth/admin/login", response_model=TokenResponse)
+def admin_login(payload: LoginRequest):
+    user = get_admin_by_email(payload.email)
+    password_match = False
+    if user:
+        db_hash = user.get("password_hash")
+        input_hash = hashlib.md5(payload.password.encode()).hexdigest()
+        if db_hash == payload.password or db_hash == input_hash:
+            password_match = True
+            
+    if not user or not password_match:
+        raise HTTPException(status_code=400, detail="Invalid email or password")
+    
+    access_token = create_access_token(
+        data={"sub": str(user["id"]), "role": user["role"], "email": user["email"]}
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "role": user["role"],
+        "name": user["name"],
+        "id": user["id"]
+    }
+
+
+@app.get("/auth/me")
+def get_me(user: dict = Depends(get_current_user)):
+    user_id = user["sub"]
+    if user["role"] == "customer":
+        profile = get_customer_profile(user_id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        profile["role"] = "customer"
+        return profile
+    else:
+        # Admin
+        admin = get_admin_by_email(user["email"])
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin user not found")
+        return {
+            "id": admin["id"],
+            "name": admin["name"],
+            "email": admin["email"],
+            "role": admin["role"]
+        }
+
+
+# Customer Portal Routes
+@app.get("/customer/profile")
+def customer_profile(user: dict = Depends(get_current_customer)):
+    profile = get_customer_profile(user["sub"])
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return profile
+
+
+@app.get("/customer/orders")
+def customer_orders(user: dict = Depends(get_current_customer)):
+    return get_customer_orders(user["sub"])
+
+
+@app.get("/customer/orders/{order_id}")
+def customer_order_detail(order_id: str, user: dict = Depends(get_current_customer)):
+    order = get_order_details(order_id)
+    if not order or str(order.get("customer_id")) != str(user["sub"]):
+        raise HTTPException(status_code=404, detail="Order not found or access denied")
+    return order
+
+
+@app.get("/customer/refunds")
+def customer_refunds(user: dict = Depends(get_current_customer)):
+    return get_customer_refund_history(user["sub"])
+
+
+# Refund Pipeline Routes
+@app.post("/refund/submit", response_model=RefundSubmissionResponse)
+async def submit_refund(payload: SubmitRefundPayload, user: dict = Depends(get_current_customer)):
+    global compiled_graph
+    if not compiled_graph:
+        raise HTTPException(status_code=500, detail="Workflow graph not compiled")
+
+    # Verify order belongs to customer
+    order = get_order_details(payload.order_id)
+    if not order or str(order.get("customer_id")) != str(user["sub"]):
+        raise HTTPException(status_code=400, detail="Invalid order or unauthorized access")
+
+    # Match order item
+    matched_item = None
+    for item in order.get("items", []):
+        if str(item.get("order_item_id")) == str(payload.order_item_id):
+            matched_item = item
+            break
+    
+    if not matched_item:
+        raise HTTPException(status_code=400, detail="Item not found in order")
+
+    # Prepare RefundRequest for LangGraph pipeline
+    request = RefundRequest(
+        customer_id=str(user["sub"]),
+        order_id=payload.order_id,
+        order_item_id=payload.order_item_id,
+        reason=payload.reason,
+        evidence_urls=payload.evidence_urls
+    )
+
+    # Initialize graph state
     initial_state = {
         "request": request,
         "audit_log": []
     }
-    
-    # Stream the graph execution to run all nodes
-    async for event in graph.astream(initial_state, config):
-        pass
-    
-    state_info = await graph.aget_state(config)
-    final_state = state_info.values
-    print_result(case_title, final_state)
-    return final_state
 
-async def main():
-    print("Starting Refund Guard Agent Workflow Verification...\n")
-    
-    async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
-        graph = workflow.compile(checkpointer=checkpointer)
-        
-        # Save the original state of the database so we can restore it at the end
-        cursor.execute("SELECT id, delivered_at FROM orders")
-        original_delivery_dates = {row["id"]: row["delivered_at"] for row in cursor.fetchall()}
-        
-        try:
-            # Case 1: Auto-Approved Refund
-            # Order 13, item 16. Delivered at a recent date.
-            recent_date = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute("UPDATE orders SET delivered_at = ? WHERE id = 13", (recent_date,))
-            cursor.execute("UPDATE order_items SET item_status = 'delivered' WHERE id = 16")
-            conn.commit()
-            
-            request1 = RefundRequest(
-                customer_id="13",
-                order_id="13",
-                order_item_id="16",
-                reason="My SanDisk pen drive is not working at all. I would like a refund.",
-                evidence_urls=[]
-            )
-            await run_case(graph, "1. Auto-Approved Refund (Eligible, Low Fraud)", request1)
-            
-            # Case 2: Auto-Rejected Refund (Outside Return Window)
-            # Order 13, item 16. Delivered at an old date.
-            old_date = (datetime.utcnow() - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S")
-            cursor.execute("UPDATE orders SET delivered_at = ? WHERE id = 13", (old_date,))
-            conn.commit()
-            
-            request2 = RefundRequest(
-                customer_id="13",
-                order_id="13",
-                order_item_id="16",
-                reason="The item is defective. Requesting refund.",
-                evidence_urls=[]
-            )
-            await run_case(graph, "2. Auto-Rejected Refund (Outside Return Window)", request2)
-            
-            # Case 3: Human Review / Escalated Refund
-            # Order 13, item 16. Recent delivery but customer has 6 recent refund requests.
-            cursor.execute("UPDATE orders SET delivered_at = ? WHERE id = 13", (recent_date,))
-            for i in range(6):
-                cursor.execute(
-                    "INSERT INTO refund_request (customer_id, order_item_id, reason, reason_category, requested_refund_amount) "
-                    "VALUES (13, 16, 'Mock reason', 'quality', 1199.00)"
-                )
-            conn.commit()
-            
-            request3 = RefundRequest(
-                customer_id="13",
-                order_id="13",
-                order_item_id="16",
-                reason="The item has scratches all over. Requesting refund.",
-                evidence_urls=[]
-            )
-            await run_case(graph, "3. Human Review / Escalated Refund (No pause, direct pending info response)", request3)
-            
-            # Clean up mock refund requests
-            cursor.execute("DELETE FROM refund_request WHERE reason = 'Mock reason'")
-            conn.commit()
-            
-            # Case 4: Edge Case - Non-Returnable Product Category
-            # Order 4, item 7. Beauty & Personal Care category (non-returnable under policy section 3).
-            cursor.execute("UPDATE orders SET delivered_at = ? WHERE id = 4", (recent_date,))
-            conn.commit()
-            
-            request4 = RefundRequest(
-                customer_id="4",
-                order_id="4",
-                order_item_id="7",
-                reason="I changed my mind. The seal is not broken.",
-                evidence_urls=[]
-            )
-            await run_case(graph, "4. Non-Returnable Product Category (Beauty Product)", request4)
-            
-            # Case 5: Edge Case - Missing Order ID
-            # Invalid order ID 99999.
-            request5 = RefundRequest(
-                customer_id="13",
-                order_id="99999",
-                order_item_id="16",
-                reason="I did not receive my item.",
-                evidence_urls=[]
-            )
-            await run_case(graph, "5. Missing / Invalid Order ID", request5)
-            
-            # Case 6: Edge Case - Duplicate Refund Request
-            # Order 1, item 2 (already has an approved refund decision).
-            cursor.execute("UPDATE orders SET delivered_at = ? WHERE id = 1", (recent_date,))
-            conn.commit()
-            
-            request6 = RefundRequest(
-                customer_id="1",
-                order_id="1",
-                order_item_id="2",
-                reason="The speaker is broken.",
-                evidence_urls=[]
-            )
-            await run_case(graph, "6. Duplicate Refund Request (Already Refunded)", request6)
-            
-        finally:
-            # Restore original delivery dates
-            print("Restoring database state...")
-            for order_id, delivered_at in original_delivery_dates.items():
-                cursor.execute("UPDATE orders SET delivered_at = ? WHERE id = ?", (delivered_at, order_id))
-            conn.commit()
-            print("Database state restored successfully.")
+    # Execute graph
+    # Generate a unique thread ID using timestamp + request details
+    thread_id = f"refund-{user['sub']}-{payload.order_id}-{payload.order_item_id}-{int(datetime.now(timezone.utc).timestamp())}"
+    config = {"configurable": {"thread_id": thread_id}}
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        # Run graph steps asynchronously until completion
+        async for _ in compiled_graph.astream(initial_state, config):
+            pass
+
+        # Fetch final state
+        state_info = await compiled_graph.aget_state(config)
+        final_state = state_info.values
+
+        # Form response
+        decision = final_state.get("decision", "reject")
+        refund_amount = float(final_state.get("refund_amount") or 0.0)
+        message = final_state.get("response_message") or "Your request could not be processed at this time."
+        refund_req_id = final_state.get("refund_request_id") or 0
+        review_id = final_state.get("review_id")
+
+        return {
+            "refund_request_id": refund_req_id,
+            "decision": decision,
+            "refund_amount": refund_amount,
+            "message": message,
+            "review_id": review_id
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pipeline processing failed: {str(e)}")
+
+
+# Admin Management Routes
+@app.get("/admin/stats")
+def admin_stats(user: dict = Depends(get_current_admin)):
+    return get_admin_stats()
+
+
+@app.get("/admin/logs")
+def admin_logs(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_current_admin)
+):
+    return get_refund_logs(limit, offset)
+
+
+@app.get("/admin/queue")
+def admin_queue(user: dict = Depends(get_current_admin)):
+    return get_review_queue()
+
+
+@app.post("/admin/queue/{review_id}/decide")
+def admin_decide(
+    review_id: int,
+    payload: QueueDecisionRequest,
+    user: dict = Depends(get_current_admin)
+):
+    admin_id = int(user["sub"])
+    decision = payload.decision
+    db_decision = "approved" if decision == "approved" else "rejected"
+
+    try:
+        success = resolve_review_decision(review_id, db_decision, admin_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Review task not found or already decided")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to process decision: {str(e)}")
+
+
+@app.get("/admin/customers")
+def admin_customers(user: dict = Depends(get_current_admin)):
+    return get_all_customers_summary()

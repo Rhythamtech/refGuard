@@ -44,10 +44,13 @@ class RefundState(TypedDict):
     request: RefundRequest
 
     # Populated by nodes
-    intent: Optional[Literal["refund", "exchange", "inquiry", "cancel"]]
+    intent: Optional[str]
     extracted_order_item_id: Optional[str]
     order_data: Optional[OrderData]
     refund_request_id : Optional[int]
+
+    # Support Guardrails
+    unrelated_msg_count: int
 
     # Eligibility
     is_eligible: Optional[bool]
