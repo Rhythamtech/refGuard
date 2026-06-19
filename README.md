@@ -4,6 +4,14 @@ Refund Guard is an intelligent, agentic refund decision system designed for quic
 
 ---
 
+## 🎬 Demo
+
+> Click the thumbnail below to watch the full demo:
+
+[![Refund Guard Demo](demo_thumbnail.jpg)](video.mp4)
+
+---
+
 ## System Architecture
 
 The application is structured into four functional layers:
