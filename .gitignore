@@ -18,3 +18,4 @@ MEMORY.md
 *.db
 *.db-shm
 *.db-wal
+docs.md

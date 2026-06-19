@@ -105,13 +105,24 @@ async def classify_intent_node(state: RefundState) -> dict:
                 order_id=None
             )
 
-    intent_type = result.intent
+    raw_intent = result.intent.lower() if result.intent else ""
+    raw_category = result.reason_category.lower() if result.reason_category else ""
 
-    if intent_type in ["wrong_item", "missing_item", "damaged", "quality", "request_refund", "cancel_order", "late_delivery"]:
-        intent_type = "refund_related"
-    elif intent_type in ["refund_inquiry"]:
+    if raw_intent == "unrelated" or raw_category in ["casual_chat", "coding_help"]:
+        intent_type = "unrelated"
+    elif raw_intent == "general_support" or raw_category in ["order_status", "tracking", "payment_issue", "product_info", "refund_inquiry", "other"]:
         intent_type = "general_support"
-    
+    elif raw_intent == "refund_related" or raw_category in ["wrong_item", "missing_item", "damaged", "quality", "request_refund", "cancel_order", "late_delivery"]:
+        intent_type = "refund_related"
+    else:
+        # Fallback based on original variable
+        if result.intent in ["wrong_item", "missing_item", "damaged", "quality", "request_refund", "cancel_order", "late_delivery"]:
+            intent_type = "refund_related"
+        elif result.intent in ["refund_inquiry"]:
+            intent_type = "general_support"
+        else:
+            # If it's none of the specific refund reasons, default to general_support
+            intent_type = "general_support"    
     order_item_id = result.order_item_id or state["request"].order_item_id
     
     unrelated_count = state.get("unrelated_msg_count", 0)

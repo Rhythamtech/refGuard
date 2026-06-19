@@ -1,4 +1,13 @@
 -- Optimized Database Schema for Customer,Refund & Fraud Management System
+DROP TABLE IF EXISTS fraud_history;
+DROP TABLE IF EXISTS refund_decision;
+DROP TABLE IF EXISTS refund_request;
+DROP TABLE IF EXISTS order_items;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS products;
+DROP TABLE IF EXISTS admin_user;
+DROP TABLE IF EXISTS customer;
+
 CREATE TABLE `customer` (
   `id` integer PRIMARY KEY,
   `full_name` varchar(255) NOT NULL,
@@ -809,6 +818,126 @@ VALUES
     'Plot No 42, Vasant Vihar, Ahmedabad, Gujarat - 380015',
     'UPI',
     '2026-02-19 15:30:00'
+  ),
+  (
+    18,
+    '2026-06-01 11:00:00',
+    1,
+    'delivered',
+    29990.00,
+    'A-404, Shanti Apartments, Sector 12, Dwarka, New Delhi - 110075',
+    'UPI',
+    '2026-06-03 14:00:00'
+  ),
+  (
+    19,
+    '2026-06-05 10:30:00',
+    1,
+    'delivered',
+    749.00,
+    'A-404, Shanti Apartments, Sector 12, Dwarka, New Delhi - 110075',
+    'Credit Card',
+    '2026-06-07 16:20:00'
+  ),
+  (
+    20,
+    '2026-06-12 12:15:00',
+    1,
+    'delivered',
+    649.00,
+    'A-404, Shanti Apartments, Sector 12, Dwarka, New Delhi - 110075',
+    'UPI',
+    '2026-06-14 11:10:00'
+  ),
+  (
+    21,
+    '2026-06-18 15:45:00',
+    1,
+    'ordered',
+    1199.00,
+    'A-404, Shanti Apartments, Sector 12, Dwarka, New Delhi - 110075',
+    'Credit Card',
+    NULL
+  ),
+  (
+    22,
+    '2026-06-02 14:00:00',
+    2,
+    'delivered',
+    2599.00,
+    'Plot No 42, Vasant Vihar, Ahmedabad, Gujarat - 380015',
+    'COD',
+    '2026-06-05 15:00:00'
+  ),
+  (
+    23,
+    '2026-06-08 09:30:00',
+    2,
+    'delivered',
+    6999.00,
+    'Plot No 42, Vasant Vihar, Ahmedabad, Gujarat - 380015',
+    'UPI',
+    '2026-06-10 12:00:00'
+  ),
+  (
+    24,
+    '2026-06-14 16:00:00',
+    2,
+    'shipped',
+    999.00,
+    'Plot No 42, Vasant Vihar, Ahmedabad, Gujarat - 380015',
+    'Credit Card',
+    NULL
+  ),
+  (
+    25,
+    '2026-06-17 11:20:00',
+    2,
+    'ordered',
+    1899.00,
+    'Plot No 42, Vasant Vihar, Ahmedabad, Gujarat - 380015',
+    'UPI',
+    NULL
+  ),
+  (
+    26,
+    '2026-06-03 13:45:00',
+    3,
+    'delivered',
+    1999.00,
+    '12, 3rd Main Road, Kasturi Nagar, Bengaluru, Karnataka - 560043',
+    'UPI',
+    '2026-06-05 11:00:00'
+  ),
+  (
+    27,
+    '2026-06-07 18:30:00',
+    3,
+    'delivered',
+    2499.00,
+    '12, 3rd Main Road, Kasturi Nagar, Bengaluru, Karnataka - 560043',
+    'Credit Card',
+    '2026-06-10 14:20:00'
+  ),
+  (
+    28,
+    '2026-06-11 10:15:00',
+    3,
+    'delivered',
+    1299.00,
+    '12, 3rd Main Road, Kasturi Nagar, Bengaluru, Karnataka - 560043',
+    'COD',
+    '2026-06-14 16:40:00'
+  ),
+  (
+    29,
+    '2026-06-16 14:50:00',
+    3,
+    'ordered',
+    649.00,
+    '12, 3rd Main Road, Kasturi Nagar, Bengaluru, Karnataka - 560043',
+    'UPI',
+    NULL
   );
 
 -- 5. INSERT MOCK ORDER ITEMS
@@ -843,7 +972,20 @@ VALUES
   (18, 14, 7, 1, 1299.00, 1299.00, 'delivered'),
   (19, 15, 26, 1, 1899.00, 1899.00, 'delivered'),
   (20, 16, 9, 1, 899.00, 899.00, 'delivered'),
-  (21, 17, 23, 1, 649.00, 649.00, 'delivered');
+  (21, 17, 23, 1, 649.00, 649.00, 'delivered'),
+  (22, 18, 4, 1, 29990.00, 29990.00, 'delivered'),
+  (23, 19, 16, 1, 450.00, 450.00, 'delivered'),
+  (24, 19, 15, 1, 299.00, 299.00, 'delivered'),
+  (25, 20, 23, 1, 649.00, 649.00, 'delivered'),
+  (26, 21, 24, 1, 1199.00, 1199.00, 'ordered'),
+  (27, 22, 6, 1, 2599.00, 2599.00, 'delivered'),
+  (28, 23, 13, 1, 6999.00, 6999.00, 'delivered'),
+  (29, 24, 25, 1, 999.00, 999.00, 'delivered'),
+  (30, 25, 26, 1, 1899.00, 1899.00, 'ordered'),
+  (31, 26, 5, 1, 1999.00, 1999.00, 'delivered'),
+  (32, 27, 18, 1, 2499.00, 2499.00, 'delivered'),
+  (33, 28, 7, 1, 1299.00, 1299.00, 'delivered'),
+  (34, 29, 23, 1, 649.00, 649.00, 'ordered');
 
 -- 6. INSERT REFUND REQUESTS (6 Requests mapped to various reasons & statuses)
 INSERT INTO
