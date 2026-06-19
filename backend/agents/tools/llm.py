@@ -16,7 +16,7 @@ def get_llm()->ChatOpenAI:
         reasoning_effort="none"
     )    
 
-def get_vision_ll() -> ChatOpenAI:
+def get_vision_llm() -> ChatOpenAI:
     return ChatOpenAI(
         base_url = os.getenv("OPENAI_BASE_URL"),
         model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini"),
@@ -25,7 +25,7 @@ def get_vision_ll() -> ChatOpenAI:
     )
 
 def get_vision_llm_with_structured_output(schema: BaseModel)->Runnable[LanguageModelInput, Any]:
-    return get_vision_ll().with_structured_output(schema) 
+    return get_vision_llm().with_structured_output(schema) 
 
 def get_llm_with_structured_output(schema: BaseModel)->Runnable[LanguageModelInput, Any]:
     return get_llm().with_structured_output(schema) 

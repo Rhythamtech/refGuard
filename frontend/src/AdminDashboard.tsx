@@ -78,9 +78,14 @@ export default function AdminDashboard({ onLogout }: { onLogout: () => void }) {
     }
   };
 
-  const handleClearLogs = () => {
-    if (window.confirm('Are you sure you want to clear the logs from the view? This action is client-side only.')) {
-      setLogs([]);
+  const handleClearLogs = async () => {
+    if (window.confirm('Are you sure you want to permanently delete all resolved logs from the server? (Pending reviews will be kept)')) {
+      try {
+        await api.clearAdminLogs();
+        await loadDashboardData();
+      } catch (err: any) {
+        alert(`Error clearing logs: ${err.message || 'Server error'}`);
+      }
     }
   };
 

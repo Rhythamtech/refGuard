@@ -1,104 +1,85 @@
-from asyncio import coroutines
+import aiosqlite
+import pathlib
+from datetime import datetime
 from backend.agents.state import RefundRequest
-from setup_database import SqliteOrderDB
 
-conn, cursor = SqliteOrderDB().connect_to_db()
+DB_PATH = pathlib.Path(__file__).parent.parent.parent.parent / "mock.db"
 
-def is_customer_fraud(customer_id: str) -> bool:
-    """
-    Returns True if the customer has been marked as fraud, False otherwise.
-    """
+class DBConnectionContext:
+    def __init__(self, conn):
+        self.conn = conn
+    async def __aenter__(self):
+        return self.conn
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.conn.close()
+
+async def get_db_conn():
+    conn = await aiosqlite.connect(DB_PATH, timeout=30.0)
+    conn.row_factory = aiosqlite.Row
+    await conn.create_function("now", 0, lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    return DBConnectionContext(conn)
+
+
+async def is_customer_fraud(customer_id: str) -> bool:
     query_string = """
         SELECT 
         COUNT(*) as fraud_count
         FROM fraud_history fh
         JOIN refund_request rr ON fh.refund_request_id = rr.id
-        WHERE rr.customer_id = ?
+        WHERE rr.customer_id = ? AND fh.fraud_score >= 0.95
     """
+    async with await get_db_conn() as conn:
+        async with conn.execute(query_string, (customer_id,)) as cursor:
+            result = await cursor.fetchone()
+            if result is None or result[0] == 0:
+                return False
+            return True
 
-    cursor.execute(query_string, (customer_id,))
-    result = cursor.fetchone()
-
-    if result is None or result[0] == 0:
-        return False
-    
-    return True
-
-
-def last_refunds(customer_id: str, days: int) -> int:
-    """
-    Returns the number of refunds the customer has received in the last n days.
-    """
+async def last_refunds(customer_id: str, days: int) -> int:
     query_string = """
         SELECT 
         COUNT(*) as refund_count
         FROM refund_request
         WHERE customer_id = ? AND created_at >= datetime('now', ?)
     """
+    async with await get_db_conn() as conn:
+        async with conn.execute(query_string, (customer_id, f"-{days} days")) as cursor:
+            result = await cursor.fetchone()
+            if result is None:
+                return 0
+            return result[0]
 
-    cursor.execute(query_string, (customer_id, f"-{days} days"))
-    result = cursor.fetchone()
-
-    if result is None:
-        return 0
-    
-    return result[0]
-
-
-def get_account_age_days(customer_id: str) -> int:
-    """
-    Returns the age of the customer's account in days.
-    """
-
+async def get_account_age_days(customer_id: str) -> int:
     query_string = """
         SELECT 
         (strftime('%s', 'now') - strftime('%s', created_at)) / 86400 as age_days
         FROM customer
         WHERE id = ?
     """
-    
-    cursor.execute(query_string, (customer_id,))
-    result = cursor.fetchone()
-    
-    if result is None:
-        return 0
-    
-    return result[0]
+    async with await get_db_conn() as conn:
+        async with conn.execute(query_string, (customer_id,)) as cursor:
+            result = await cursor.fetchone()
+            if result is None:
+                return 0
+            return result[0]
 
-def check_duplicate_refund(order_item_id: str) -> bool:
-    """
-    Returns True if the order item has already been refunded, False otherwise.
-    """
+async def check_duplicate_refund(order_item_id: str) -> bool:
     query_string = """
         SELECT rd.decision FROM refund_decision rd
         JOIN  refund_request rr
         ON rd.refund_request_id = rr.id
         WHERE rr.order_item_id = ?
         """
-    cursor.execute(query_string, (order_item_id,))
-    result = cursor.fetchone()
+    async with await get_db_conn() as conn:
+        async with conn.execute(query_string, (order_item_id,)) as cursor:
+            result = await cursor.fetchone()
+            if result is None:
+                return False
+            if result["decision"] == "approved":
+                return True
+            return False
 
-    if result is None:
-        return False
-    if result["decision"] == "approved":
-        return True
-    
-    return False   
-
-def get_order_details(order_id: str):
-
-    """
-    Returns a dictionary with the following structure:
-    {
-        "order_id": str,
-        "customer_id": str,
-        "items": List[dict],
-        "total_amount": Decimal,
-        "delivered_at": Optional[datetime],
-        "status": str,
-        "payment_method": str
-    }
-    """
+async def get_order_details(order_id: str):
     query_string = """
         SELECT 
             id as order_id, 
@@ -110,7 +91,6 @@ def get_order_details(order_id: str):
         FROM orders
         WHERE id = ?
     """
-
     query_item_string = """
         SELECT 
             oi.id as order_item_id,
@@ -125,39 +105,33 @@ def get_order_details(order_id: str):
         ON oi.product_id = p.id
         WHERE order_id = ?
     """
-
-    cursor.execute(query_string, (order_id,))
-    result = cursor.fetchone()
-
-    cursor.execute(query_item_string, (order_id,))
-    result_items = cursor.fetchall()
-
-    # Convert result to list of dictionaries
+    async with await get_db_conn() as conn:
+        async with conn.execute(query_string, (order_id,)) as cursor:
+            result = await cursor.fetchone()
+        if result is None:
+            return {}
+        async with conn.execute(query_item_string, (order_id,)) as cursor:
+            result_items = await cursor.fetchall()
+            
     result_items = [dict(row) for row in result_items]
-
-    if result is None:
-        return 0
-    
-    # Convert result to dictionary
     result_dict = dict(result)
     result_dict["items"] = result_items
-    
     return result_dict
 
-def create_refund_request(order_id: str, customer_id : str,order_item_id: str, reason: str , intent:str):
-    cursor.execute("SELECT total_price FROM order_items WHERE id = ?", (order_item_id,))
-    row = cursor.fetchone()
-    amount = row["total_price"] if row else 0.0
+async def create_refund_request(order_id: str, customer_id: str, order_item_id: str, reason: str, intent: str):
+    async with await get_db_conn() as conn:
+        async with conn.execute("SELECT total_price FROM order_items WHERE id = ?", (order_item_id,)) as cursor:
+            row = await cursor.fetchone()
+        amount = row["total_price"] if row else 0.0
 
-    query = """
-        INSERT INTO refund_request (customer_id, order_item_id, reason, reason_category, requested_refund_amount)
-        VALUES (?, ?, ?, ?, ?)
-    """
-    cursor.execute(query, (customer_id, order_item_id, reason, intent, amount))
-    conn.commit()
-
-    return cursor.lastrowid
-
+        query = """
+            INSERT INTO refund_request (customer_id, order_item_id, reason, reason_category, requested_refund_amount)
+            VALUES (?, ?, ?, ?, ?)
+        """
+        async with conn.execute(query, (customer_id, order_item_id, reason, intent, amount)) as cursor:
+            lastrowid = cursor.lastrowid
+        await conn.commit()
+    return lastrowid
 
 def format_audit_logs(audit_log: list | None) -> str:
     if not audit_log:
@@ -187,37 +161,28 @@ def format_audit_logs(audit_log: list | None) -> str:
         
     return "\n".join(formatted_steps)
 
-
-import threading
-
-db_lock = threading.Lock()
-
-def create_review_queue_entry(
+async def create_review_queue_entry(
     refund_request_id: int,
     fraud_score: float,
     signals: list[str],
     audit_log: list | None = None,
 ) -> int:
-    """
-    Inserts a pending_review row into refund_decision and marks refund_request as escalated.
-    Returns the new row's primary key (review_id).
-    The payment action is blocked until this row is resolved by a human agent.
-    """
     flagged_rules = ", ".join(signals) if signals else ""
     review_content = f"fraud_score={fraud_score:.2f} signals=[{flagged_rules}]"
     if audit_log:
         audit_str = format_audit_logs(audit_log)
         review_content += f"\n\nAI Audit Log:\n{audit_str}"
         
-    with db_lock:
-        cursor.execute(
+    async with await get_db_conn() as conn:
+        async with conn.execute(
             """
             INSERT INTO refund_decision (refund_request_id, decision, review)
             VALUES (?, 'pending_review', ?)
             """,
             (refund_request_id, review_content),
-        )
-        cursor.execute(
+        ) as cursor:
+            lastrowid = cursor.lastrowid
+        await conn.execute(
             """
             UPDATE refund_request
             SET status = 'escalated'
@@ -225,23 +190,16 @@ def create_review_queue_entry(
             """,
             (refund_request_id,),
         )
-        conn.commit()
-    return cursor.lastrowid
+        await conn.commit()
+    return lastrowid
 
-
-def resolve_review_decision(
+async def resolve_review_decision(
     review_id: int,
     decision: str,
     decided_by: int,
 ) -> bool:
-    """
-    Updates a pending_review row with the human agent's final decision and updates refund_request status.
-    Called by the POST /refund/review/{review_id}/decision API endpoint.
-    decision must be 'approved' or 'rejected'.
-    """
-    with db_lock:
-        # Get refund_request_id and amount
-        cursor.execute(
+    async with await get_db_conn() as conn:
+        async with conn.execute(
             """
             SELECT refund_request_id, rr.requested_refund_amount
             FROM refund_decision rd
@@ -249,8 +207,8 @@ def resolve_review_decision(
             WHERE rd.id = ? AND rd.decision = 'pending_review'
             """,
             (review_id,),
-        )
-        row = cursor.fetchone()
+        ) as cursor:
+            row = await cursor.fetchone()
         if not row:
             return False
 
@@ -258,8 +216,7 @@ def resolve_review_decision(
         amount = float(row["requested_refund_amount"]) if decision == "approved" else 0.0
         review_text = f"Human Approved by Admin ID: {decided_by}" if decision == "approved" else f"Human Rejected by Admin ID: {decided_by}"
 
-        # Update refund_decision
-        cursor.execute(
+        await conn.execute(
             """
             UPDATE refund_decision
             SET decision = ?,
@@ -271,9 +228,7 @@ def resolve_review_decision(
             """,
             (decision, decided_by, amount, review_text, review_id),
         )
-
-        # Update refund_request
-        cursor.execute(
+        await conn.execute(
             """
             UPDATE refund_request
             SET status = ?,
@@ -282,37 +237,31 @@ def resolve_review_decision(
             """,
             (decision, req_id),
         )
-        conn.commit()
+        await conn.commit()
         return True
 
-
-def save_refund_decision(
+async def save_refund_decision(
     refund_request_id: int,
     review: str,
     amount: float,
     decided_by: int | None = None,
     audit_log: list | None = None,
 ) -> int:
-    """
-    Writes an approved refund_decision record and updates refund_request status.
-    Used by process_refund_node (auto-approve path) and the human-approve API path.
-    The refund_id is a UUID generated by the caller for idempotency.
-    # TODO: replace the DB write below with a real payment gateway call before committing.
-    """
     final_review = review
     if audit_log:
         audit_str = format_audit_logs(audit_log)
         final_review = f"{review}\n\nAI Audit Log:\n{audit_str}" if review else f"AI Audit Log:\n{audit_str}"
 
-    with db_lock:
-        cursor.execute(
+    async with await get_db_conn() as conn:
+        async with conn.execute(
             """
             INSERT INTO refund_decision (refund_request_id, decision, decision_by, refunded_amount, review, decided_at)
             VALUES (?, 'approved', ?, ?, ?, datetime('now'))
             """,
             (refund_request_id, decided_by, amount, final_review),
-        )
-        cursor.execute(
+        ) as cursor:
+            lastrowid = cursor.lastrowid
+        await conn.execute(
             """
             UPDATE refund_request
             SET status = 'approved',
@@ -321,34 +270,30 @@ def save_refund_decision(
             """,
             (refund_request_id,),
         )
-        conn.commit()
+        await conn.commit()
+    return lastrowid
 
-    return cursor.lastrowid
-
-
-def save_refund_rejection(
+async def save_refund_rejection(
     refund_request_id: int,
     review: str,
     decided_by: int | None = None,
     audit_log: list | None = None,
 ) -> int:
-    """
-    Writes a rejected refund_decision record and updates refund_request status to 'rejected'.
-    """
     final_review = review
     if audit_log:
         audit_str = format_audit_logs(audit_log)
         final_review = f"{review}\n\nAI Audit Log:\n{audit_str}" if review else f"AI Audit Log:\n{audit_str}"
 
-    with db_lock:
-        cursor.execute(
+    async with await get_db_conn() as conn:
+        async with conn.execute(
             """
             INSERT INTO refund_decision (refund_request_id, decision, decision_by, refunded_amount, review, decided_at)
             VALUES (?, 'rejected', ?, 0.0, ?, datetime('now'))
             """,
             (refund_request_id, decided_by, final_review),
-        )
-        cursor.execute(
+        ) as cursor:
+            lastrowid = cursor.lastrowid
+        await conn.execute(
             """
             UPDATE refund_request
             SET status = 'rejected',
@@ -357,71 +302,60 @@ def save_refund_rejection(
             """,
             (refund_request_id,),
         )
-        conn.commit()
+        await conn.commit()
+    return lastrowid
 
-    return cursor.lastrowid
-
-
-def save_fraud_history(
+async def save_fraud_history(
     refund_request_id: int,
     fraud_score: float,
     flagged_rules: list[str],
 ) -> int:
-    """
-    Inserts a record into the fraud_history table.
-    """
     rules_str = ", ".join(flagged_rules) if flagged_rules else ""
-    with db_lock:
-        cursor.execute(
+    async with await get_db_conn() as conn:
+        async with conn.execute(
             """
             INSERT INTO fraud_history (refund_request_id, fraud_score, flagged_rules, created_at)
             VALUES (?, ?, ?, datetime('now'))
             """,
             (refund_request_id, fraud_score, rules_str),
-        )
-        conn.commit()
+        ) as cursor:
+            lastrowid = cursor.lastrowid
+        await conn.commit()
+    return lastrowid
 
-    return cursor.lastrowid
+async def get_customer_by_email(email: str):
+    async with await get_db_conn() as conn:
+        async with conn.execute("SELECT * FROM customer WHERE email = ?", (email,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
+async def get_admin_by_email(email: str):
+    async with await get_db_conn() as conn:
+        async with conn.execute("SELECT * FROM admin_user WHERE email = ?", (email,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
+async def get_customer_profile(customer_id: str):
+    async with await get_db_conn() as conn:
+        async with conn.execute("SELECT id, full_name, email, phone_number, address, created_at FROM customer WHERE id = ?", (customer_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
-import threading
-
-db_lock = threading.Lock()
-
-def get_customer_by_email(email: str):
-    with db_lock:
-        cursor.execute("SELECT * FROM customer WHERE email = ?", (email,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
-
-def get_admin_by_email(email: str):
-    with db_lock:
-        cursor.execute("SELECT * FROM admin_user WHERE email = ?", (email,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
-
-def get_customer_profile(customer_id: str):
-    with db_lock:
-        cursor.execute("SELECT id, full_name, email, phone_number, address, created_at FROM customer WHERE id = ?", (customer_id,))
-        row = cursor.fetchone()
-        return dict(row) if row else None
-
-def get_customer_orders(customer_id: str):
-    with db_lock:
-        cursor.execute("""
+async def get_customer_orders(customer_id: str):
+    async with await get_db_conn() as conn:
+        async with conn.execute("""
             SELECT o.id as order_id, o.ordered_at, o.status, o.total_amount, o.payment_method, o.delivered_at,
                    (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as item_count
             FROM orders o
             WHERE o.customer_id = ?
             ORDER BY o.ordered_at DESC
-        """, (customer_id,))
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        """, (customer_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
-def get_customer_refund_history(customer_id: str):
-    with db_lock:
-        cursor.execute("""
+async def get_customer_refund_history(customer_id: str):
+    async with await get_db_conn() as conn:
+        async with conn.execute("""
             SELECT rr.id, rr.order_item_id, rr.reason, rr.reason_category, rr.status, rr.requested_refund_amount, rr.created_at,
                    rd.decision, rd.refunded_amount, rd.review, rd.decided_at,
                    p.title as product_name
@@ -431,13 +365,13 @@ def get_customer_refund_history(customer_id: str):
             JOIN products p ON oi.product_id = p.id
             WHERE rr.customer_id = ?
             ORDER BY rr.created_at DESC
-        """, (customer_id,))
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        """, (customer_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
-def get_review_queue():
-    with db_lock:
-        cursor.execute("""
+async def get_review_queue():
+    async with await get_db_conn() as conn:
+        async with conn.execute("""
             SELECT rd.id as review_id, rd.refund_request_id, rd.review, rd.created_at as review_created_at,
                    rr.customer_id, rr.order_item_id, rr.reason, rr.reason_category, rr.requested_refund_amount,
                    rr.created_at as request_created_at, c.full_name as customer_name
@@ -446,8 +380,8 @@ def get_review_queue():
             JOIN customer c ON rr.customer_id = c.id
             WHERE rd.decision = 'pending_review'
             ORDER BY rd.created_at DESC
-        """)
-        rows = cursor.fetchall()
+        """) as cursor:
+            rows = await cursor.fetchall()
         result = []
         for r in rows:
             d = dict(r)
@@ -468,9 +402,9 @@ def get_review_queue():
             result.append(d)
         return result
 
-def get_refund_logs(limit: int = 20, offset: int = 0):
-    with db_lock:
-        cursor.execute("""
+async def get_refund_logs(limit: int = 20, offset: int = 0):
+    async with await get_db_conn() as conn:
+        async with conn.execute("""
             SELECT rd.id, rd.refund_request_id, rd.decision, rd.refunded_amount, rd.review, rd.created_at, rd.decided_at,
                    rr.customer_id, rr.order_item_id, rr.reason, c.full_name as customer_name
             FROM refund_decision rd
@@ -478,38 +412,35 @@ def get_refund_logs(limit: int = 20, offset: int = 0):
             JOIN customer c ON rr.customer_id = c.id
             ORDER BY rd.created_at DESC
             LIMIT ? OFFSET ?
-        """, (limit, offset))
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        """, (limit, offset)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
-def get_admin_stats():
-    with db_lock:
-        cursor.execute("SELECT COUNT(*) FROM refund_decision WHERE decision != 'pending_review'")
-        total_processed = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM refund_decision WHERE decision = 'approved'")
-        approved_count = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM refund_decision WHERE decision = 'rejected'")
-        rejected_count = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM refund_decision WHERE decision = 'pending_review'")
-        pending_count = cursor.fetchone()[0] or 0
+async def get_admin_stats():
+    async with await get_db_conn() as conn:
+        async with conn.execute("SELECT COUNT(*) FROM refund_decision WHERE decision != 'pending_review'") as cursor:
+            total_processed = (await cursor.fetchone())[0] or 0
+        async with conn.execute("SELECT COUNT(*) FROM refund_decision WHERE decision = 'approved'") as cursor:
+            approved_count = (await cursor.fetchone())[0] or 0
+        async with conn.execute("SELECT COUNT(*) FROM refund_decision WHERE decision = 'rejected'") as cursor:
+            rejected_count = (await cursor.fetchone())[0] or 0
+        async with conn.execute("SELECT COUNT(*) FROM refund_decision WHERE decision = 'pending_review'") as cursor:
+            pending_count = (await cursor.fetchone())[0] or 0
         
         success_rate = 0.0
         if (approved_count + rejected_count) > 0:
             success_rate = (approved_count / (approved_count + rejected_count)) * 100.0
             
-        cursor.execute("""
+        async with conn.execute("""
             SELECT AVG(strftime('%s', decided_at) - strftime('%s', created_at)) 
             FROM refund_decision 
             WHERE decision != 'pending_review' AND decided_at IS NOT NULL AND created_at IS NOT NULL
-        """)
-        avg_res = cursor.fetchone()[0]
+        """) as cursor:
+            avg_res = (await cursor.fetchone())[0]
         avg_resolution_seconds = float(avg_res) if avg_res is not None else 0.0
         
-        if avg_resolution_seconds <= 0:
-            avg_resolution_seconds = 1.4
+        if avg_resolution_seconds < 0:
+            avg_resolution_seconds = 0.0
 
         return {
             "total_processed": total_processed,
@@ -520,9 +451,9 @@ def get_admin_stats():
             "avg_resolution_seconds": round(avg_resolution_seconds, 1)
         }
 
-def get_all_customers_summary():
-    with db_lock:
-        cursor.execute("""
+async def get_all_customers_summary():
+    async with await get_db_conn() as conn:
+        async with conn.execute("""
             SELECT c.id, c.full_name, c.email, c.created_at,
                    (SELECT COUNT(*) FROM refund_request WHERE customer_id = c.id) as refund_requests_count,
                    (SELECT SUM(refunded_amount) FROM refund_decision rd 
@@ -530,21 +461,14 @@ def get_all_customers_summary():
                     WHERE rr.customer_id = c.id AND rd.decision = 'approved') as total_refunded_amount
             FROM customer c
             ORDER BY c.id ASC
-        """)
-        rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        """) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
-def clear_all_logs():
-    """
-    Deletes all records from refund_decision and refund_request,
-    except for those that are still 'pending_review' in the queue.
-    """
-    with db_lock:
-        # First, delete from refund_decision
-        cursor.execute("DELETE FROM refund_decision WHERE decision != 'pending_review'")
-        
-        # Then, delete orphaned refund_requests (ones that no longer have a pending decision)
-        cursor.execute("""
+async def clear_all_logs():
+    async with await get_db_conn() as conn:
+        await conn.execute("DELETE FROM refund_decision WHERE decision != 'pending_review'")
+        await conn.execute("""
             DELETE FROM refund_request 
             WHERE id NOT IN (
                 SELECT refund_request_id 
@@ -552,13 +476,11 @@ def clear_all_logs():
                 WHERE decision = 'pending_review'
             )
         """)
-        
-        # Also clear fraud history linked to deleted requests
-        cursor.execute("""
+        await conn.execute("""
             DELETE FROM fraud_history
             WHERE refund_request_id NOT IN (
                 SELECT id FROM refund_request
             )
         """)
-        conn.commit()
+        await conn.commit()
         return True

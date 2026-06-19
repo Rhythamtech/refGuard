@@ -13,3 +13,8 @@ wheels/
 # skills
 .agents
 MEMORY.md
+
+# Database files
+*.db
+*.db-shm
+*.db-wal

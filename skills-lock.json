@@ -18,6 +18,12 @@
       "sourceType": "github",
       "skillPath": "skills/langchain-architecture/SKILL.md",
       "computedHash": "00751d08438c2de939624deb6434a2b7c9a1b90e47505eaa0af70b782399218c"
+    },
+    "senior-backend": {
+      "source": "alirezarezvani/claude-skills",
+      "sourceType": "github",
+      "skillPath": "engineering-team/skills/senior-backend/SKILL.md",
+      "computedHash": "e4f6ded80cd956df679067046bfc2eb706e48841261e8e5033bfa4ae2a677cd1"
     }
   }
 }

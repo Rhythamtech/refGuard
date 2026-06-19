@@ -10,12 +10,14 @@ from pydantic import BaseModel, Field
 from . import helper
 helper.DOCS_DIR = Path(__file__).parent.parent.parent
 
+import contextvars
+
 class EligibilityVerdict(BaseModel):
     is_eligible: bool = Field(description="Whether the customer/item is eligible for a refund according to policy")
     reason: str = Field(description="Detailed reason explaining the decision citing specific policy sections")
     policy_sections: List[str] = Field(description="List of policy sections referenced (e.g., '1. Eligibility for Refunds', '3. Non-Refundable Items')")
 
-_final_verdict: Optional[EligibilityVerdict] = None
+_final_verdict: contextvars.ContextVar[Optional[EligibilityVerdict]] = contextvars.ContextVar("_final_verdict", default=None)
 
 @tool
 def grep_policy(pattern: str) -> str:
@@ -93,10 +95,9 @@ def evaluate_eligibility(is_eligible: bool, reason: str, policy_sections: List[s
     This tool MUST be called to finish the evaluation. Do NOT try to output
     a text response as the final answer; call this tool instead.
     """
-    global _final_verdict
-    _final_verdict = EligibilityVerdict(
+    _final_verdict.set(EligibilityVerdict(
         is_eligible=is_eligible,
         reason=reason,
         policy_sections=policy_sections
-    )
+    ))
     return "Evaluation submitted successfully. You can stop now."

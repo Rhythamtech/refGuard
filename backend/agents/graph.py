@@ -34,6 +34,8 @@ def route_after_eligibility(state: RefundState) -> str:
         return "error"
     if state.get("is_eligible") is False:
         return "generate_response"
+    if state.get("decision") == "human_review":
+        return "human_review"
     return "fraud_detection"
 
 def route_after_fraud(state: RefundState) -> str:
@@ -85,7 +87,8 @@ workflow.add_conditional_edges(
     {
         "error": "error",
         "generate_response": "generate_response",
-        "fraud_detection": "fraud_detection"
+        "fraud_detection": "fraud_detection",
+        "human_review": "human_review"
     }
 )
 

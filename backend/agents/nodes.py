@@ -99,30 +99,21 @@ async def classify_intent_node(state: RefundState) -> dict:
             )
 
     intent_type = result.intent
-    # Map specific labels to high-level types if LLM didn't do it
-    if intent_type in ["wrong_item", "missing_item", "damaged", "quality", "refund_inquiry", "request_refund", "cancel_order", "late_delivery"]:
+
+    if intent_type in ["wrong_item", "missing_item", "damaged", "quality", "request_refund", "cancel_order", "late_delivery"]:
         intent_type = "refund_related"
+    elif intent_type in ["refund_inquiry"]:
+        intent_type = "general_support"
     
     order_item_id = result.order_item_id or state["request"].order_item_id
     
     unrelated_count = state.get("unrelated_msg_count", 0)
     if intent_type == "unrelated":
         unrelated_count += 1
-
-    # Only create refund_request in DB if it's actually refund related
-    refund_request_id = state.get("refund_request_id")
-    if intent_type == "refund_related":
-        refund_request_id = create_refund_request(
-            order_id=state["request"].order_id,
-            customer_id=state["request"].customer_id,
-            order_item_id=order_item_id,
-            reason=state["request"].reason,
-            intent=result.intent # use specific label for DB
-        )
     
     return {
-        "refund_request_id": refund_request_id,
         "intent": intent_type,
+        "intent_label": result.intent,
         "extracted_order_item_id": order_item_id,
         "unrelated_msg_count": unrelated_count,
         "audit_log": state["audit_log"] + [{
@@ -153,14 +144,29 @@ async def fraud_detection_node(state: RefundState) -> dict:
             }]
         }   
 
-    is_fraud =  is_customer_fraud(customer_id)
+    is_fraud = await is_customer_fraud(customer_id)
 
     if is_fraud:
         fraud_score += 1
+        signals.append("fraudulent_customer")
+
+        recent_refunds = await last_refunds(customer_id=customer_id, days=30)
+        if recent_refunds > 5:
+            signals.append("high_refund_frequency")
+        elif recent_refunds > 3:
+            signals.append("moderate_refund_frequency")
+
+        account_age = await get_account_age_days(customer_id=customer_id)
+        if account_age < 7:
+            signals.append("new_customer")
+
+        already_refunded = await check_duplicate_refund(order_item_id)
+        if already_refunded:
+            signals.append("duplicate_refund")
 
         refund_req_id = state.get("refund_request_id")
         if refund_req_id:
-            save_fraud_history(
+            await save_fraud_history(
                 refund_request_id=int(refund_req_id),
                 fraud_score=float(fraud_score),
                 flagged_rules=signals,
@@ -179,8 +185,8 @@ async def fraud_detection_node(state: RefundState) -> dict:
         }   
     
     else :
-        recent_refunds = last_refunds(customer_id=customer_id, days=30)
-        account_age = get_account_age_days(customer_id=customer_id)
+        recent_refunds = await last_refunds(customer_id=customer_id, days=30)
+        account_age = await get_account_age_days(customer_id=customer_id)
 
         if recent_refunds > 5:
             fraud_score += 0.35
@@ -193,7 +199,7 @@ async def fraud_detection_node(state: RefundState) -> dict:
         if account_age < 7:
             signals.append("new_customer")
 
-        already_refunded = check_duplicate_refund(order_item_id)
+        already_refunded = await check_duplicate_refund(order_item_id)
 
         if already_refunded:
             fraud_score += 1
@@ -202,16 +208,16 @@ async def fraud_detection_node(state: RefundState) -> dict:
         if state["request"].evidence_urls:
             evidence_result = await analyze_evidence_images_with_llm(state["request"].evidence_urls, state["request"].reason)
             
-            if evidence_result["fraud_score"] < 0.4:  
+            if evidence_result["fraud_score"] > 0.6:  
                 fraud_score += 0.3
-                signals.append("evidence_mismatch")
+                signals.append("evidence_suspicious")
 
         fraud_score = min(fraud_score, 1.0)
         decision = "approve" if fraud_score < 0.3 else ("human_review" if fraud_score < 0.7 else "reject")
 
         refund_req_id = state.get("refund_request_id")
         if refund_req_id:
-            save_fraud_history(
+            await save_fraud_history(
                 refund_request_id=int(refund_req_id),
                 fraud_score=float(fraud_score),
                 flagged_rules=signals,
@@ -245,7 +251,7 @@ async def lookup_order_node(state: RefundState) -> dict:
         }
 
     try:
-        order_data = get_order_details(state["request"].order_id)
+        order_data = await get_order_details(state["request"].order_id)
         if not order_data:
             return {
                 "is_eligible": False,
@@ -275,8 +281,19 @@ async def lookup_order_node(state: RefundState) -> dict:
     total_amount = order_data.total_amount if hasattr(order_data, "total_amount") else order_data.get("total_amount")
     status = order_data.status if hasattr(order_data, "status") else order_data.get("status")
 
+    refund_request_id = state.get("refund_request_id")
+    if not refund_request_id and state.get("intent") == "refund_related":
+        refund_request_id = await create_refund_request(
+            order_id=state["request"].order_id,
+            customer_id=state["request"].customer_id,
+            order_item_id=state.get("extracted_order_item_id") or state["request"].order_item_id,
+            reason=state["request"].reason,
+            intent=state.get("intent_label") or "refund_related"
+        )
+
     return {
         "order_data": order_data,
+        "refund_request_id": refund_request_id,
         "audit_log": state["audit_log"] + [{
             "step": "lookup_order",
             "result": {
@@ -292,7 +309,8 @@ async def lookup_order_node(state: RefundState) -> dict:
 
 async def check_eligibility_node(state: RefundState) -> dict:
     """
-    Checks if the refund request is eligible for a refund using an LLM agent.
+    Pre-flight deterministic rules (applied before LLM)
+    Everything else is forwarded to the LLM ReAct agent.
     """
     order_data = state.get("order_data")
     if not order_data:
@@ -311,29 +329,96 @@ async def check_eligibility_node(state: RefundState) -> dict:
 
     order_item_id = state["request"].order_item_id
     items = order_data.get("items", [])
-    status = order_data.get("status")
+    order_status = order_data.get("status", "") or ""
+    shipment_status = order_data.get("shipment_status", "") or ""
     delivered_at = order_data.get("delivered_at")
 
-    if status == "shipped":
+   
+    _in_transit_statuses = {"shipped", "in_transit", "in transit"}
+
+    # Rule: out_for_delivery → reject (cannot cancel once out for delivery)
+    if order_status.lower() == "out_for_delivery" or shipment_status.lower() == "out_for_delivery":
         return {
             "is_eligible": False,
-            "eligibility_reason": "Orders that are currently in 'shipped' status cannot be refunded until they are delivered.",
-            "policy_context": "1. Eligibility for Refunds",
+            "eligibility_reason": "Order cannot be cancelled once out for delivery.",
+            "policy_context": "Additional Refund Rules – Shipped Orders",
             "decision": "reject",
-            "response_message": "We're unable to process your refund request because your order is currently shipped and in transit. Please wait for delivery before requesting a refund.",
+            "response_message": (
+                "We're unable to process your refund request because your order is already "
+                "out for delivery and cannot be cancelled at this stage. "
+                "Please wait for delivery and then contact support if there is an issue."
+            ),
             "refund_amount": Decimal(0),
             "audit_log": state["audit_log"] + [{
                 "step": "check_eligibility",
                 "result": {
                     "is_eligible": False,
-                    "reason": "Order is currently shipped (in transit)",
-                    "policy_sections": ["1. Eligibility for Refunds"],
+                    "reason": "Out for delivery – cannot cancel",
+                    "policy_sections": ["Additional Refund Rules – Shipped Orders"],
                     "order_item_id": order_item_id
                 },
                 "ts": datetime.now(timezone.utc).isoformat()
             }]
         }
 
+    # Rule: cancelled + not shipped → approve_refund
+    if order_status.lower() == "cancelled" and shipment_status.lower() in ("", "not_shipped", "not shipped"):
+        return {
+            "is_eligible": True,
+            "eligibility_reason": "Order was cancelled before shipment – full refund approved.",
+            "policy_context": "Additional Refund Rules – Order Cancellation",
+            "decision": "approve",
+            "audit_log": state["audit_log"] + [{
+                "step": "check_eligibility",
+                "result": {
+                    "is_eligible": True,
+                    "reason": "Cancelled before shipment",
+                    "policy_sections": ["Additional Refund Rules – Order Cancellation"],
+                    "order_item_id": order_item_id
+                },
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
+
+    # Rule: cancelled + already shipped/in_transit → human_review
+    if order_status.lower() == "cancelled" and shipment_status.lower() in _in_transit_statuses:
+        return {
+            "is_eligible": True,
+            "eligibility_reason": "Order was cancelled after shipment – requires human review.",
+            "policy_context": "Additional Refund Rules – Order Cancellation",
+            "decision": "human_review",
+            "audit_log": state["audit_log"] + [{
+                "step": "check_eligibility",
+                "result": {
+                    "is_eligible": True,
+                    "reason": "Cancelled after shipment – human review required",
+                    "policy_sections": ["Additional Refund Rules – Order Cancellation"],
+                    "order_item_id": order_item_id
+                },
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
+
+    # Rule: shipped / in_transit (active, not cancelled) → human_review
+    if order_status.lower() in _in_transit_statuses or shipment_status.lower() in _in_transit_statuses:
+        return {
+            "is_eligible": True,
+            "eligibility_reason": "Order is currently in transit – requires human review before any refund action.",
+            "policy_context": "Additional Refund Rules – Shipped Orders",
+            "decision": "human_review",
+            "audit_log": state["audit_log"] + [{
+                "step": "check_eligibility",
+                "result": {
+                    "is_eligible": True,
+                    "reason": "Order in transit – human review required per policy",
+                    "policy_sections": ["Additional Refund Rules – Shipped Orders"],
+                    "order_item_id": order_item_id
+                },
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
+
+    # For all other statuses, delegate to the LLM ReAct agent
     # Find the specific order item requested
     matched_item = None
     for item in items:
@@ -356,7 +441,8 @@ async def check_eligibility_node(state: RefundState) -> dict:
         "order_item_id": order_item_id,
         "request_reason": state["request"].reason,
         "intent": state.get("intent"),
-        "order_status": status,
+        "order_status": order_status,
+        "shipment_status": shipment_status,
         "delivered_at": str(delivered_at) if delivered_at else None,
         "days_since_delivery": days,
         "matched_item": {
@@ -371,8 +457,8 @@ async def check_eligibility_node(state: RefundState) -> dict:
         "fraud_signals": state.get("fraud_signals", [])
     }
 
-    # Reset the global verdict registry
-    et_module._final_verdict = None
+    # Reset the context variable
+    et_module._final_verdict.set(None)
 
     try:
         # Initialize ReAct agent execution
@@ -423,37 +509,47 @@ async def check_eligibility_node(state: RefundState) -> dict:
                 if tool_name == "evaluate_eligibility":
                     break
 
-            if et_module._final_verdict is not None:
+            if et_module._final_verdict.get() is not None:
                 break
 
             step += 1
 
     except Exception as e:
-        # Log LLM execution failure in internal trace (silently fallback)
-        pass
+        return {
+            "is_eligible": True,
+            "eligibility_reason": "LLM evaluation failed; escalating to human review",
+            "decision": "human_review",
+            "audit_log": state["audit_log"] + [{
+                "step": "check_eligibility",
+                "result": {
+                    "is_eligible": True,
+                    "reason": "LLM evaluation failed; escalating to human review",
+                    "policy_sections": ["1. Eligibility for Refunds"],
+                    "order_item_id": order_item_id
+                },
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
 
-    # Retrieve the agent's final verdict or run the fallback engine
-    verdict = et_module._final_verdict
+    verdict = et_module._final_verdict.get()
     if verdict is None:
-        # Safety Fallback Engine (replicates standard policy constraints)
-        is_eligible = True
-        reason = None
-
-        if matched_item and matched_item.get("status") == "refunded":
-            is_eligible = False
-            reason = "This order has already been refunded."
-        else:
-            return_window_days = matched_item.get("return_window_days") if matched_item else None
-            if return_window_days is not None and days is not None:
-                if days > return_window_days:
-                    is_eligible = False
-                    reason = f"Order is {days} days old, outside the {return_window_days}-day return window."
-
-        verdict = et_module.EligibilityVerdict(
-            is_eligible=is_eligible,
-            reason=reason or "Eligible for refund",
-            policy_sections=["1. Eligibility for Refunds"]
-        )
+        # Fallback to human review if LLM failed to call evaluate_eligibility tool
+        return {
+            "is_eligible": True,
+            "eligibility_reason": "LLM evaluation failed to return a verdict; escalating to human review",
+            "decision": "human_review",
+            "policy_context": "1. Eligibility for Refunds",
+            "audit_log": state["audit_log"] + [{
+                "step": "check_eligibility",
+                "result": {
+                    "is_eligible": True,
+                    "reason": "LLM evaluation failed to return a verdict; escalating to human review",
+                    "policy_sections": ["1. Eligibility for Refunds"],
+                    "order_item_id": order_item_id
+                },
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
 
     # Return structured state updates based on the verdict
     if not verdict.is_eligible:
@@ -492,8 +588,6 @@ async def check_eligibility_node(state: RefundState) -> dict:
         }]
     }
 
-
-
 async def human_review_node(state: RefundState) -> dict:
     """
     Marks the refund request as pending human review.
@@ -504,6 +598,16 @@ async def human_review_node(state: RefundState) -> dict:
     customer_id = state["request"].customer_id
     fraud_score = state.get("fraud_score") or 0.0
     fraud_signals = state.get("fraud_signals") or []
+
+    refund_request_id = state.get("refund_request_id")
+    if not refund_request_id:
+        refund_request_id = await create_refund_request(
+            order_id=order_id,
+            customer_id=customer_id,
+            order_item_id=order_item_id,
+            reason=state["request"].reason,
+            intent=state.get("intent", "refund_related")
+        )
 
     current_audit_log = state["audit_log"] + [{
         "step": "human_review",
@@ -517,8 +621,8 @@ async def human_review_node(state: RefundState) -> dict:
         "ts": datetime.now(timezone.utc).isoformat(),
     }]
 
-    review_id = create_review_queue_entry(
-        refund_request_id=int(state["refund_request_id"]),
+    review_id = await create_review_queue_entry(
+        refund_request_id=int(refund_request_id),
         fraud_score=fraud_score,
         signals=fraud_signals,
         audit_log=current_audit_log,
@@ -527,11 +631,9 @@ async def human_review_node(state: RefundState) -> dict:
     return {
         "decision": "human_review",
         "review_id": review_id,
+        "refund_request_id": refund_request_id,
         "audit_log": current_audit_log,
     }
-
-
-
 
 async def process_refund_node(state: RefundState) -> dict:
     """
@@ -555,8 +657,18 @@ async def process_refund_node(state: RefundState) -> dict:
         "ts": datetime.now(timezone.utc).isoformat(),
     }]
 
-    refund_decision_id = save_refund_decision(
-        refund_request_id=int(state["refund_request_id"]),
+    refund_request_id = state.get("refund_request_id")
+    if not refund_request_id:
+        refund_request_id = await create_refund_request(
+            order_id=state["request"].order_id,
+            customer_id=state["request"].customer_id,
+            order_item_id=state["request"].order_item_id,
+            reason=state["request"].reason,
+            intent=state.get("intent", "refund_related")
+        )
+
+    refund_decision_id = await save_refund_decision(
+        refund_request_id=int(refund_request_id),
         review=evidence_review,
         amount=float(refund_amount),
         audit_log=current_audit_log,
@@ -564,6 +676,7 @@ async def process_refund_node(state: RefundState) -> dict:
 
     return {
         "refund_id": refund_decision_id,
+        "refund_request_id": refund_request_id,
         "refund_amount": refund_amount,
         "response_message": (
             f"Your refund of ₹{refund_amount:.2f} has been approved. "
@@ -571,7 +684,6 @@ async def process_refund_node(state: RefundState) -> dict:
         ),
         "audit_log": current_audit_log,
     }
-
 
 async def generate_response_node(state: RefundState) -> dict:
     """
@@ -615,7 +727,7 @@ async def generate_response_node(state: RefundState) -> dict:
                 "result": {"decision": decision, "message": message},
                 "ts": datetime.now(timezone.utc).isoformat(),
             }]
-            save_refund_rejection(
+            await save_refund_rejection(
                 refund_request_id=int(refund_req_id),
                 review=reason,
                 audit_log=current_audit_log,
@@ -637,6 +749,23 @@ async def general_support_node(state: RefundState) -> dict:
     """
     query = state["request"].reason or ""
 
+    unrelated_count = state.get("unrelated_msg_count", 0)
+    if unrelated_count >= 3:
+        refusal_message = (
+            "I have repeatedly informed you that I can only assist with e-commerce queries. "
+            "Since we are unable to stay on topic, I must stop responding. "
+            "Please start a new request if you have order or refund inquiries."
+        )
+        return {
+            "response_message": refusal_message,
+            "decision": "support",
+            "audit_log": state["audit_log"] + [{
+                "step": "general_support",
+                "result": {"message": refusal_message, "blocked_due_to_unrelated_limit": True},
+                "ts": datetime.now(timezone.utc).isoformat()
+            }]
+        }
+
     if check_regex_guardrails(query):
         refusal_message = (
             "I can only assist with e-commerce-related queries, including order status, delivery updates, "
@@ -653,7 +782,7 @@ async def general_support_node(state: RefundState) -> dict:
             }]
         }
 
-    customer_data = get_customer_profile(state["request"].customer_id)
+    customer_data = await get_customer_profile(state["request"].customer_id)
     
     chain = GENERAL_SUPPORT_PROMPT | get_llm()
     

@@ -1,14 +1,11 @@
+import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Literal
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
-
-# Ensure backend and root are in the sys.path so imports resolve correctly
-sys.path.append(str(Path(__file__).parent.parent))
-sys.path.append(str(Path(__file__).parent))
-
+from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
@@ -30,15 +27,17 @@ from backend.agents.tools.db import (
     get_admin_stats,
     get_all_customers_summary,
     resolve_review_decision,
-    save_refund_decision
+    clear_all_logs,
 )
 
-# JWT Constants
-SECRET_KEY = "refund-guard-secret-key-12345!"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
 
 from contextlib import asynccontextmanager
+
+
+load_dotenv()
+
+sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent))
 
 compiled_graph = None
 
@@ -72,12 +71,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, os.getenv("SECRET_KEY"), algorithm=os.getenv("ALGORITHM"))
     return encoded_jwt
 
 def decode_token(token: str):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, os.getenv("SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")])
         return payload
     except JWTError:
         raise HTTPException(
@@ -135,8 +134,8 @@ def health_check():
 
 
 @app.post("/auth/customer/login", response_model=TokenResponse)
-def customer_login(payload: LoginRequest):
-    user = get_customer_by_email(payload.email)
+async def customer_login(payload: LoginRequest):
+    user = await get_customer_by_email(payload.email)
     # Support both raw password comparison and MD5 hash comparison
     password_match = False
     if user:
@@ -161,8 +160,8 @@ def customer_login(payload: LoginRequest):
 
 
 @app.post("/auth/admin/login", response_model=TokenResponse)
-def admin_login(payload: LoginRequest):
-    user = get_admin_by_email(payload.email)
+async def admin_login(payload: LoginRequest):
+    user = await get_admin_by_email(payload.email)
     password_match = False
     if user:
         db_hash = user.get("password_hash")
@@ -186,17 +185,17 @@ def admin_login(payload: LoginRequest):
 
 
 @app.get("/auth/me")
-def get_me(user: dict = Depends(get_current_user)):
+async def get_me(user: dict = Depends(get_current_user)):
     user_id = user["sub"]
     if user["role"] == "customer":
-        profile = get_customer_profile(user_id)
+        profile = await get_customer_profile(user_id)
         if not profile:
             raise HTTPException(status_code=404, detail="Customer not found")
         profile["role"] = "customer"
         return profile
     else:
         # Admin
-        admin = get_admin_by_email(user["email"])
+        admin = await get_admin_by_email(user["email"])
         if not admin:
             raise HTTPException(status_code=404, detail="Admin user not found")
         return {
@@ -209,29 +208,29 @@ def get_me(user: dict = Depends(get_current_user)):
 
 # Customer Portal Routes
 @app.get("/customer/profile")
-def customer_profile(user: dict = Depends(get_current_customer)):
-    profile = get_customer_profile(user["sub"])
+async def customer_profile(user: dict = Depends(get_current_customer)):
+    profile = await get_customer_profile(user["sub"])
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
 
 
 @app.get("/customer/orders")
-def customer_orders(user: dict = Depends(get_current_customer)):
-    return get_customer_orders(user["sub"])
+async def customer_orders(user: dict = Depends(get_current_customer)):
+    return await get_customer_orders(user["sub"])
 
 
 @app.get("/customer/orders/{order_id}")
-def customer_order_detail(order_id: str, user: dict = Depends(get_current_customer)):
-    order = get_order_details(order_id)
+async def customer_order_detail(order_id: str, user: dict = Depends(get_current_customer)):
+    order = await get_order_details(order_id)
     if not order or str(order.get("customer_id")) != str(user["sub"]):
         raise HTTPException(status_code=404, detail="Order not found or access denied")
     return order
 
 
 @app.get("/customer/refunds")
-def customer_refunds(user: dict = Depends(get_current_customer)):
-    return get_customer_refund_history(user["sub"])
+async def customer_refunds(user: dict = Depends(get_current_customer)):
+    return await get_customer_refund_history(user["sub"])
 
 
 # Refund Pipeline Routes
@@ -242,7 +241,7 @@ async def submit_refund(payload: SubmitRefundPayload, user: dict = Depends(get_c
         raise HTTPException(status_code=500, detail="Workflow graph not compiled")
 
     # Verify order belongs to customer
-    order = get_order_details(payload.order_id)
+    order = await get_order_details(payload.order_id)
     if not order or str(order.get("customer_id")) != str(user["sub"]):
         raise HTTPException(status_code=400, detail="Invalid order or unauthorized access")
 
@@ -306,26 +305,34 @@ async def submit_refund(payload: SubmitRefundPayload, user: dict = Depends(get_c
 
 # Admin Management Routes
 @app.get("/admin/stats")
-def admin_stats(user: dict = Depends(get_current_admin)):
-    return get_admin_stats()
+async def admin_stats(user: dict = Depends(get_current_admin)):
+    return await get_admin_stats()
 
 
 @app.get("/admin/logs")
-def admin_logs(
+async def admin_logs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: dict = Depends(get_current_admin)
 ):
-    return get_refund_logs(limit, offset)
+    return await get_refund_logs(limit, offset)
+
+
+@app.delete("/admin/logs")
+async def admin_clear_logs(user: dict = Depends(get_current_admin)):
+    success = await clear_all_logs()
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to clear logs")
+    return {"ok": True}
 
 
 @app.get("/admin/queue")
-def admin_queue(user: dict = Depends(get_current_admin)):
-    return get_review_queue()
+async def admin_queue(user: dict = Depends(get_current_admin)):
+    return await get_review_queue()
 
 
 @app.post("/admin/queue/{review_id}/decide")
-def admin_decide(
+async def admin_decide(
     review_id: int,
     payload: QueueDecisionRequest,
     user: dict = Depends(get_current_admin)
@@ -335,7 +342,7 @@ def admin_decide(
     db_decision = "approved" if decision == "approved" else "rejected"
 
     try:
-        success = resolve_review_decision(review_id, db_decision, admin_id)
+        success = await resolve_review_decision(review_id, db_decision, admin_id)
         if not success:
             raise HTTPException(status_code=404, detail="Review task not found or already decided")
         return {"ok": True}
@@ -346,5 +353,5 @@ def admin_decide(
 
 
 @app.get("/admin/customers")
-def admin_customers(user: dict = Depends(get_current_admin)):
-    return get_all_customers_summary()
+async def admin_customers(user: dict = Depends(get_current_admin)):
+    return await get_all_customers_summary()

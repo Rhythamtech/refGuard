@@ -128,7 +128,7 @@ CODING_PATTERN = re.compile(
     re.IGNORECASE
 )
 PERSONAL_ADVICE_PATTERN = re.compile(
-    r"\b(relationship(s)?|dating|love|marriage|divorce|boyfriend|girlfriend|husband|wife|friend(s)?|career|job|life|personal|financial|medical|legal|health|investment|stock(s)?|crypto|money|advice|tips|what should i do|help me choose|opinion on)\b",
+    r"\b(relationship(s)?|dating|love|marriage|divorce|boyfriend|girlfriend|husband|wife|friend(s)?|career|life|personal|financial|medical|legal|health|investment|stock(s)?|crypto|advice|tips|what should i do|help me choose|opinion on)\b",
     re.IGNORECASE
 )
 CASUAL_CHAT_PATTERN = re.compile(

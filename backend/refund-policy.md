@@ -2,96 +2,263 @@
 
 **Effective Date:** June 15, 2026
 
-This Refund Policy applies to all purchases made through Store. By completing a purchase, the customer agrees to the terms of this policy.
+This Refund Policy governs all purchases made through Store. By placing an order, the customer agrees to this policy.
 
-## 1. Eligibility for Refunds
+## 1. General Refund Policy
 
-A refund request may be submitted only if the product or service is eligible under its stated refund window.
+Refunds are not automatically guaranteed for every purchase. All refund requests are subject to eligibility verification, product-specific return rules, order status, and approval by Store.
 
-- The refund request must be made within the refund window applicable to that specific product or service.
-- The refund window is determined by the product category, service type, or offer terms shown at the time of purchase.
-- If no refund window is stated for a product or service, that item is considered non-refundable unless required otherwise by law.
-- The customer must provide a valid order ID, purchase date, and proof of purchase.
-- The request must relate to a genuine issue covered by this policy.
-- Orders with a delivery status of 'shipped' (in transit) are not eligible for refunds. A refund request can only be evaluated after the order is fully delivered.
+Store reserves the right to approve, reject, partially approve, replace, exchange, repair, or provide store credit for any refund request based on the circumstances of the case.
 
-## 2. Refund Window
+## 2. Eligible Refund Scenarios
 
-Refund window timelines may vary by product or service.
+A refund request may be considered only if one or more of the following conditions apply:
 
-- The applicable refund window will be displayed on the product page, checkout page, invoice, order confirmation, or help center article.
-- The refund request date is calculated from the original purchase date or from the delivery/activation date, depending on the product-specific terms.
-- Where a service begins immediately after purchase, the refund window may begin at the time of activation.
-- In case of conflict, the refund window stated in the product-specific terms will apply.
+* The customer received a wrong item.
+* The customer received a damaged item.
+* The item was defective upon delivery.
+* The item was missing from the shipment.
+* The order was paid for but was never delivered.
+* The item materially differs from its product description.
+* The order was canceled before shipment and payment was successfully captured.
+* A refund is otherwise required under applicable law.
 
-## 3. Non-Refundable Items
+Store may require evidence before approving any claim.
 
-Unless otherwise required by law, the following items are non-refundable:
+## 3. Non-Refundable Situations
 
-- Products or services purchased outside the applicable refund window.
-- Digital products, credits, subscriptions, or services already used, consumed, or fully delivered.
-- Setup fees, service charges, convenience fees, processing fees, and administrative fees.
-- Promotional items, bonus credits, free trials, and complimentary services.
-- Customized, personalized, or made-to-order items.
-- Orders flagged for fraud, abuse, chargeback misuse, or policy violation.
+Refunds will not be provided in the following situations:
 
-## 4. Refund Conditions
+* Refund request submitted outside the applicable return or refund window.
+* Change of mind after the return window has expired.
+* Normal wear and tear.
+* Minor cosmetic imperfections that do not affect functionality.
+* Damage caused by misuse, negligence, improper handling, unauthorized repair, modification, accident, or failure to follow instructions.
+* Products returned without original packaging, tags, accessories, manuals, warranty cards, or included components where required.
+* Personalized, customized, engraved, altered, or made-to-order products.
+* Gift cards, prepaid balances, promotional credits, vouchers, coupons, and reward points.
+* Digital products, downloadable content, software licenses, subscriptions, memberships, or services that have been activated, accessed, consumed, or delivered.
+* Products marked as "Non-Returnable" or "Final Sale" at the time of purchase.
+* Claims based solely on personal preference, dissatisfaction, or incorrect purchasing decisions.
+* Orders flagged for fraud, abuse, reselling activity, suspicious transactions, policy manipulation, or chargeback abuse.
 
-A refund may be approved only when all required conditions are satisfied.
+## 4. Delivery Status Restrictions
 
-- The request is submitted within the applicable refund window.
-- The issue is not caused by customer misuse, incorrect setup, or failure to follow instructions.
-- The product or service is materially defective, not delivered, incorrectly delivered, or otherwise eligible under the stated terms.
-- The customer provides all requested documentation for review.
-- This store is able to verify the claim using order records, support records, or other internal checks.
+Orders that are currently:
 
-## 5. Refund Review and Approval
+* Processing,
+* Packed,
+* Ready to ship, or
+* In transit,
 
-All refund requests are reviewed by This store before approval.
+are not eligible for refund review on the basis of delivery-related claims until delivery is completed or the shipment is officially declared lost by the carrier.
 
-- This store may request supporting documents, screenshots, delivery proof, logs, or other evidence.
-- This store may approve a full refund, partial refund, replacement, credit, or denial depending on the facts of the case.
-- This store reserves the right to deny any request that is incomplete, inaccurate, misleading, or outside policy.
-- This store may reject duplicate claims for the same order or issue.
+Customers may be eligible for cancellation only where the cancellation option is available before shipment.
 
-## 6. Refund Processing
+## 5. Return and Refund Window
 
-If a refund is approved, it will be processed as follows:
+The applicable return or refund window is determined by the product category and offer terms displayed at the time of purchase.
 
-- Refunds will be issued only to the original payment method unless this is not possible.
-- Processing time may take 5 to 10 business days after approval.
-- Bank, card network, and payment gateway delays are outside This store’s control.
-- If the original payment method cannot receive the refund, This store may issue store credit or an alternative remedy at its discretion.
+* The refund window may begin from the purchase date, delivery date, activation date, or service commencement date, depending on the product.
+* Product-specific return policies take precedence over this general policy.
+* Claims submitted after the applicable window expires will be automatically rejected.
 
-## 7. Chargebacks and Disputes
+## 6. Verification Requirements
 
-Customers should contact This store Support before filing a chargeback.
+Store may require any of the following:
 
-- If a chargeback is filed, This store may pause or close the refund review process.
-- Abuse of the chargeback process may result in account restrictions or denial of future claims.
-- This store may use transaction records and support logs to respond to payment disputes.
+* Order ID.
+* Proof of purchase.
+* Photos of the product.
+* Videos showing the issue.
+* Packaging images.
+* Shipping labels.
+* Serial numbers.
+* Identity verification.
+* Any additional information reasonably required for investigation.
 
-## 8. How to Submit a Refund Request
+Failure to provide requested evidence may result in rejection of the claim.
 
-To submit a refund request, the customer must provide:
+## 7. Inspection and Quality Review
 
-- Full name.
-- Registered email address or phone number.
-- Order ID.
-- Product or service name.
-- Purchase date.
-- Reason for the request.
-- Supporting evidence, if applicable.
+For returned products:
 
-Refund requests must be submitted through the official This store support channel.
+* Store may inspect the returned item before approving a refund.
+* Returned products must match the original order details.
+* Products showing signs of misuse, tampering, replacement, alteration, missing components, or intentional damage may be rejected.
+* Store's inspection results shall be final for refund determination.
 
-## 9. Policy Updates
+## 8. Partial Refunds
 
-This store may update this policy from time to time.
+Store may issue a partial refund when:
 
-- Updated terms will apply to future purchases unless stated otherwise.
-- The policy in effect at the time of purchase will govern that order, unless a newer policy is more favorable to the customer or required by law.
+* Returned items are incomplete.
+* Accessories or components are missing.
+* Product value has been reduced due to customer actions.
+* The issue affects only part of the order.
+* Restocking, shipping, handling, or processing deductions are permitted by law.
 
-## 10. Contact
+## 9. Refund Approval and Method
 
-For billing questions or refund requests, contact This store Support through the official support channel listed on the This store website.
+If approved:
+
+* Refunds will be issued to the original payment method whenever possible.
+* Store may issue store credit, wallet credit, replacement, exchange, repair, or alternative compensation instead of a cash refund where permitted.
+* Original shipping charges, convenience fees, platform fees, payment processing fees, gift wrap fees, installation charges, and service fees are non-refundable unless required by law.
+
+## 10. Refund Processing Time
+
+Once approved:
+
+* Refunds are typically initiated within 5–10 business days.
+* Banks, payment providers, card networks, and financial institutions may require additional processing time.
+* Store is not responsible for delays caused by third-party payment providers.
+
+## 11. Fraud Prevention
+
+Store reserves the right to reject any claim involving:
+
+* Excessive refund requests.
+* Repeated return abuse.
+* False claims.
+* Item switching.
+* Empty-box fraud.
+* Chargeback abuse.
+* Suspicious account activity.
+* Policy circumvention attempts.
+
+Store may suspend accounts, deny future purchases, restrict refund privileges, or pursue legal remedies where appropriate.
+
+## 12. Chargebacks and Payment Disputes
+
+Customers must contact Store Support before initiating a chargeback.
+
+If a chargeback is filed:
+
+* Any active refund request may be suspended.
+* The matter may be transferred to the payment provider for resolution.
+* Store may provide transaction records, delivery records, communication logs, and investigation findings as evidence.
+
+## 13. Limitation of Liability
+
+To the maximum extent permitted by law:
+
+* Store's liability shall not exceed the amount paid for the affected product or service.
+* Store shall not be liable for indirect, incidental, consequential, special, or punitive damages arising from any purchase, refund request, or product use.
+
+## 14. Right to Refuse Refunds
+
+Store reserves the sole right to approve or deny refund requests after reviewing all relevant information.
+
+Submission of a refund request does not guarantee approval.
+
+## 15. Policy Changes
+
+Store may update this Refund Policy at any time.
+
+The version of the policy in effect on the purchase date shall generally govern the order unless a newer version is required by law or is more favorable to the customer.
+
+## 16. Contact
+
+To submit a refund request, customers must contact Store through the official support channels and provide:
+
+* Full name
+* Registered email address or phone number
+* Order ID
+* Product name
+* Purchase date
+* Reason for request
+* Supporting evidence
+
+Incomplete requests may not be processed.
+
+## Additional Refund Rules
+
+### Order Cancellation
+
+* Orders successfully canceled before shipment are eligible for a full refund.
+* Once an order has been shipped, cancellation is no longer guaranteed.
+* Shipped orders must follow the return and refund process after delivery.
+* Cancellation requests submitted after delivery will be treated as return requests.
+
+### Shipped Orders
+
+* Orders with status `Shipped`, `Out for Delivery`, or `In Transit` are not automatically eligible for refunds.
+* If the customer reports a genuine issue before delivery, the case must be reviewed by a human support agent.
+* The AI assistant must not approve refunds for shipped orders without human review.
+* The customer may be asked to wait until delivery is completed before a refund decision can be made.
+
+### Delivered Orders
+
+* Delivered orders may be eligible for a refund only if the issue falls within the applicable refund policy.
+* Claims for damaged, defective, missing, or incorrect products may require photo or video evidence.
+* Refund approval is subject to verification of the claim.
+
+### Lost Shipment
+
+* If carrier tracking confirms the shipment is lost, a refund or replacement may be offered.
+* If tracking shows successful delivery, additional verification may be required.
+* Claims for lost shipments may require a waiting period determined by the carrier.
+
+### Damaged Product
+
+* Customers must provide clear photos or videos showing the damage.
+* Claims submitted without evidence may be rejected.
+* Human review may be required for high-value items.
+
+### Wrong Product Received
+
+* Customers must provide images showing the received product and packaging.
+* Store may offer replacement, exchange, or refund after verification.
+* Intentional misuse of this claim may result in account restrictions.
+
+### Missing Items
+
+* Missing item claims must be reported within the allowed reporting period.
+* Package images and unboxing videos may be requested.
+* High-risk claims may require manual investigation.
+
+### Digital Products
+
+* Digital products are generally non-refundable once delivered, activated, downloaded, or accessed.
+* Exceptions may apply when the product cannot be delivered due to a verified technical issue caused by the store.
+
+### Subscription Services
+
+* Refunds are generally not available for partially used subscription periods.
+* Canceling a subscription prevents future charges but does not automatically refund previous payments.
+* Exceptional cases require manual review.
+
+### High-Value Orders
+
+* Orders exceeding the store's risk threshold require human approval before any refund is issued.
+* The AI assistant must escalate such requests automatically.
+
+### Multiple Refund Requests
+
+* Repeated refund requests from the same account may trigger fraud checks.
+* The AI assistant must escalate suspicious activity for manual review.
+
+### Insufficient Evidence
+
+* If required evidence is missing, the refund request cannot be approved.
+* Customers may submit additional information for reconsideration.
+
+### Policy Abuse
+
+* Customers found abusing refund policies may lose refund privileges.
+* Store reserves the right to reject future claims from accounts involved in fraudulent activity.
+
+### Human Review Required
+
+The AI assistant must not approve refunds when:
+
+* The order has already been shipped.
+* The order value exceeds the review threshold.
+* Fraud indicators are detected.
+* The customer has an unusual refund history.
+* Evidence is unclear or conflicting.
+* The request falls outside standard policy rules.
+* Multiple products are involved in a single claim.
+* A chargeback has already been initiated.
+

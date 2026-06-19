@@ -189,6 +189,8 @@ export const api = {
   getAdminLogs: (limit: number = 20, offset: number = 0) =>
     request<AdminLog[]>(`/admin/logs?limit=${limit}&offset=${offset}`),
 
+  clearAdminLogs: () => request<{ ok: boolean }>('/admin/logs', { method: 'DELETE' }),
+
   getAdminQueue: () => request<QueueItem[]>('/admin/queue'),
 
   decideQueueItem: (reviewId: number, decision: 'approved' | 'rejected') =>

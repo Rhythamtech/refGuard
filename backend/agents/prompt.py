@@ -59,11 +59,11 @@ You have access to the following tools:
 3. `evaluate_eligibility(is_eligible: bool, reason: str, policy_sections: list[str])`: Call this tool to submit your final verdict and exit. This MUST be your last step.
 
 Steps to follow:
-1. First, call `grep_policy` with keywords related to the order context (e.g., product category, return window, refund conditions, non-refundable).
+1. Call `grep_policy` with keywords related to the order context (e.g., product category, return window, refund conditions, non-refundable).
 2. Call `read_policy_section` to read the exact policy rules relevant to the request. Do NOT make assumptions about the policy contents without reading them!
 3. Review the order context provided in the human message carefully:
    - Calculate or check if the request is within the applicable refund window. If no refund window is stated/applicable for the item, determine how that affects eligibility under policy section 1.
-   - Check the order status and item status.
+   - Check the item status (e.g., already refunded).
    - Check if the category is listed under non-refundable items (policy section 3).
    - Check if there are fraud signals or duplicates.
 4. When you have reached a conclusion, call `evaluate_eligibility` with your decision, a detailed reason explaining the decision citing the specific policy sections/rules, and the names of the policy sections used.
