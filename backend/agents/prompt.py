@@ -6,14 +6,14 @@ Extract: intent type, order ID, reason category, and confidence.
 
 Intent types:
 - refund_related: anything related to refunds, returns, missing items, damaged items, cancellations, or getting money back.
-- general_support: questions about order status, delivery date/ETA, shipment tracking, payment status, product info, or general help.
+- general_support: questions about order details, order ID/number, order status, delivery date/ETA, shipment tracking, payment status, product info, or general help.
 - unrelated: casual conversation, roleplay, storytelling, coding help, personal advice, or anything outside e-commerce support.
 
 Reason categories: wrong_item | missing_item | not_delivered | damaged | quality | refund_inquiry | request_refund | cancel_order | late_delivery | order_status | tracking | payment_issue | product_info | casual_chat | coding_help | other
 
 CRITICAL: If the user asks for coding help, stories, roleplay, or personal advice, you MUST classify it as 'unrelated'.
 Return valid JSON matching the IntentOutput schema."""),
-    ("human", "Customer message: {message}\nContext: {context}")
+    ("human", "Chat History:\n{chat_history}\n\nCustomer message: {message}\nContext: {context}")
 ])
 
 GENERAL_SUPPORT_PROMPT = ChatPromptTemplate.from_messages([
@@ -34,7 +34,7 @@ Order Data: {order_data}
 Customer Data: {customer_data}
 Unrelated Message Count: {unrelated_msg_count}
 """),
-    ("human", "{query}")
+    ("human", "Chat History:\n{chat_history}\n\nCustomer message: {query}")
 ])
 
 

@@ -266,18 +266,27 @@ async def submit_refund(payload: SubmitRefundPayload, user: dict = Depends(get_c
         evidence_urls=payload.evidence_urls
     )
 
-    # Initialize graph state
-    initial_state = {
-        "request": request,
-        "audit_log": []
-    }
-
     # Execute graph
-    # Generate a unique thread ID using timestamp + request details
-    thread_id = f"refund-{user['sub']}-{payload.order_id}-{payload.order_item_id}-{int(datetime.now(timezone.utc).timestamp())}"
+    # Generate a stable thread ID per user/order/item
+    thread_id = f"refund-{user['sub']}-{payload.order_id}-{payload.order_item_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
+        # Check for previous state to retrieve chat_history
+        state_info = await compiled_graph.aget_state(config)
+        previous_history = state_info.values.get("chat_history", []) if state_info.values else []
+        new_history = previous_history + [{"role": "user", "content": payload.reason}]
+
+        # Initialize graph state
+        initial_state = {
+            "request": request,
+            "chat_history": new_history,
+            "audit_log": state_info.values.get("audit_log", []) if state_info.values else [],
+            "unrelated_msg_count": state_info.values.get("unrelated_msg_count", 0) if state_info.values else 0,
+            "order_data": state_info.values.get("order_data") if state_info.values else None,
+            "refund_request_id": state_info.values.get("refund_request_id") if state_info.values else None,
+        }
+
         # Run graph steps asynchronously until completion
         async for _ in compiled_graph.astream(initial_state, config):
             pass

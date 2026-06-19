@@ -106,7 +106,7 @@ INTENT_RULES = [
     # ── GENERAL SUPPORT
     ("general_support", 0.95, "order_status",
      re.compile(
-         r"\b(status|track(ing)?|where is my (order|package)|when will it arrive|ETA|delivery (date|time)|order details|view my order|payment status|how to pay|product info|details about)\b",
+         r"\b(status|track(ing)?|where is my (order|package)|when will it arrive|ETA|delivery (date|time)|order details|view my order|payment status|how to pay|product info|details about|order (id|number|no|code))\b",
          re.IGNORECASE
      )),
 

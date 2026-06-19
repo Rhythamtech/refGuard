@@ -16,6 +16,10 @@ export default function CustomerChat({ onLogout }: { onLogout: () => void }) {
     sender: 'ai' | 'user';
     text: string;
     timestamp: string;
+    refundContext?: {
+      itemName: string;
+      orderId: number;
+    };
     decisionCard?: {
       decision: string;
       amount: number;
@@ -28,6 +32,10 @@ export default function CustomerChat({ onLogout }: { onLogout: () => void }) {
     sender: 'ai' | 'user';
     text: string;
     timestamp: string;
+    refundContext?: {
+      itemName: string;
+      orderId: number;
+    };
     decisionCard?: {
       decision: string;
       amount: number;
@@ -135,7 +143,11 @@ export default function CustomerChat({ onLogout }: { onLogout: () => void }) {
     const userMsg = {
       id: `user-msg-${Date.now()}`,
       sender: 'user' as const,
-      text: `Requesting refund for "${itemName}" from Order #${selectedOrder.order_id}. Reason: ${reason}`,
+      text: reason.trim(),
+      refundContext: {
+        itemName,
+        orderId: selectedOrder.order_id
+      },
       timestamp
     };
 
@@ -168,12 +180,12 @@ export default function CustomerChat({ onLogout }: { onLogout: () => void }) {
         sender: 'ai' as const,
         text: result.message,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        decisionCard: {
+        decisionCard: result.decision !== 'support' ? {
           decision: result.decision,
           amount: result.refund_amount,
           request_id: result.refund_request_id,
           review_id: result.review_id
-        }
+        } : undefined
       };
 
       setMessages(prev => {
@@ -339,6 +351,11 @@ export default function CustomerChat({ onLogout }: { onLogout: () => void }) {
                   <div className={`border border-[#141414] p-3 text-sm flex flex-col gap-2 shadow-[2px_2px_0px_#141414] ${
                     m.sender === 'user' ? 'bg-[#E4E3E0]' : 'bg-[#fdfdfc]'
                   }`}>
+                    {m.refundContext && (
+                      <div className="text-[10px] font-mono text-gray-500 uppercase tracking-wider border-b border-dashed border-[#141414]/20 pb-1.5 mb-0.5">
+                        Requesting refund for <span className="font-bold text-[#141414]">"{m.refundContext.itemName}"</span> from Order #{m.refundContext.orderId}
+                      </div>
+                    )}
                     <p className="leading-relaxed m-0 font-medium whitespace-pre-wrap">{m.text}</p>
                     
                     {/* Embedded Refund Decision Card */}

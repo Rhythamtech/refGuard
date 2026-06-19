@@ -85,8 +85,15 @@ async def classify_intent_node(state: RefundState) -> dict:
         result = regex_intent
     else:
         try:
+            history_lines = []
+            for msg in state.get("chat_history", [])[:-1]:
+                role = "Customer" if msg["role"] == "user" else "Assistant"
+                history_lines.append(f"{role}: {msg['content']}")
+            chat_history_str = "\n".join(history_lines) if history_lines else "No previous history."
+
             chain = INTENT_PROMPT | get_llm_with_structured_output(IntentOutput)
             result = await chain.ainvoke({
+                "chat_history": chat_history_str,
                 "message": state["request"].reason,
                 "context": f"order_item_id hint: {state['request'].order_item_id}"
             })
@@ -750,6 +757,7 @@ async def generate_response_node(state: RefundState) -> dict:
 
     return {
         "response_message": message,
+        "chat_history": state.get("chat_history", []) + [{"role": "assistant", "content": message}],
         "audit_log": state["audit_log"] + [{
             "step": "generate_response",
             "result": {"decision": decision, "message": message},
@@ -774,6 +782,7 @@ async def general_support_node(state: RefundState) -> dict:
         return {
             "response_message": refusal_message,
             "decision": "support",
+            "chat_history": state.get("chat_history", []) + [{"role": "assistant", "content": refusal_message}],
             "audit_log": state["audit_log"] + [{
                 "step": "general_support",
                 "result": {"message": refusal_message, "blocked_due_to_unrelated_limit": True},
@@ -790,6 +799,7 @@ async def general_support_node(state: RefundState) -> dict:
         return {
             "response_message": refusal_message,
             "decision": "support",
+            "chat_history": state.get("chat_history", []) + [{"role": "assistant", "content": refusal_message}],
             "audit_log": state["audit_log"] + [{
                 "step": "general_support",
                 "result": {"message": refusal_message, "refused": True},
@@ -799,9 +809,16 @@ async def general_support_node(state: RefundState) -> dict:
 
     customer_data = await get_customer_profile(state["request"].customer_id)
     
+    history_lines = []
+    for msg in state.get("chat_history", [])[:-1]:
+        role = "Customer" if msg["role"] == "user" else "Assistant"
+        history_lines.append(f"{role}: {msg['content']}")
+    chat_history_str = "\n".join(history_lines) if history_lines else "No previous history."
+
     chain = GENERAL_SUPPORT_PROMPT | get_llm()
     
     response = await chain.ainvoke({
+        "chat_history": chat_history_str,
         "order_data": state.get("order_data"),
         "customer_data": customer_data,
         "unrelated_msg_count": state.get("unrelated_msg_count", 0),
@@ -813,6 +830,7 @@ async def general_support_node(state: RefundState) -> dict:
     return {
         "response_message": message,
         "decision": "support",
+        "chat_history": state.get("chat_history", []) + [{"role": "assistant", "content": message}],
         "audit_log": state["audit_log"] + [{
             "step": "general_support",
             "result": {"message": message},
@@ -837,6 +855,7 @@ async def error_node(state: RefundState) -> dict:
     return {
         "decision": "reject",
         "response_message": message,
+        "chat_history": state.get("chat_history", []) + [{"role": "assistant", "content": message}],
         "audit_log": state["audit_log"] + [{
             "step": "error",
             "result": {"internal_error": internal_error},

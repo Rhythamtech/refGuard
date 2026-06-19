@@ -42,6 +42,7 @@ class RefundResponse(BaseModel):
 class RefundState(TypedDict):
     # Input
     request: RefundRequest
+    chat_history: List[dict]
 
     # Populated by nodes
     intent: Optional[str]
