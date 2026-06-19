@@ -61,11 +61,29 @@ flowchart TD
 - **Human Review**: Marks suspicious or boundary claims as `pending_review` in the database to be resolved by support agents.
 - **Generate Response**: Constructs context-appropriate, customer-friendly status messages.
 
+> 📖 For a full deep-dive into every node, routing function, and state field, see [docs.md](docs.md).
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| **Backend Framework** | FastAPI + Uvicorn |
+| **AI Orchestration** | LangGraph, LangChain |
+| **LLM Provider** | OpenAI (GPT-4o-mini + Vision) |
+| **State Persistence** | LangGraph SQLite Checkpointer |
+| **Database** | SQLite (`mock.db`) |
+| **Authentication** | JWT (python-jose) |
+| **Frontend** | React 19, Vite, TypeScript, TailwindCSS v4 |
+| **Animations** | Framer Motion |
+| **Package Manager** | uv (backend), bun (frontend) |
+
 ---
 
 ## Frontend Application Flow
 
-The frontend is a React-based Single Page Application (SPA) that provides tailored experiences for customers and administrative staff.
+The frontend is a React + TypeScript SPA built with Vite that provides tailored experiences for customers and administrative staff.
 
 ### 1. Authentication & Routing
 - **Login**: A unified login page handles both customers and admin users via JWT-based authentication.
@@ -214,10 +232,16 @@ erDiagram
 
 ---
 
-## How to Set Up & Run Tests
+## How to Set Up & Run
 
-### 1. Configure Environment
-Copy `.env.example` to `.env` and fill in your OpenAI API credentials:
+### 1. Prerequisites
+
+- Python ≥ 3.12 and [`uv`](https://docs.astral.sh/uv/) installed
+- Node.js and [`bun`](https://bun.sh/) installed (for the frontend)
+
+### 2. Configure Environment
+
+Copy `.env.example` to `.env` and fill in your credentials:
 ```bash
 cp .env.example .env
 ```
@@ -227,30 +251,52 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_VISION_MODEL=gpt-4o-mini
+SECRET_KEY=your-random-secret-key
+ALGORITHM=HS256
 ```
 
-### 2. Activate Environment
-Initialize and activate your virtual environment:
+> `SECRET_KEY` is used to sign JWT tokens. Generate one with: `python -c "import secrets; print(secrets.token_hex(32))"`
+
+### 3. Install Backend Dependencies
+
 ```bash
-source .venv/bin/activate
+uv sync
 ```
 
-### 3. Run the Verification Suite
-You can run the verification suite in two ways:
+### 4. Run the Backend Server
+
+```bash
+uv run uvicorn backend.main:app --reload --port 8000
+```
+
+The FastAPI server will be available at `http://localhost:8000`. Interactive API docs at `http://localhost:8000/docs`.
+
+### 5. Run the Frontend
+
+```bash
+cd frontend
+bun install
+bun run dev
+```
+
+The frontend will be available at `http://localhost:3000`.
+
+---
+
+## Running Tests
+
+The test scenarios (Auto-Approve, Auto-Reject, Escalated Human Review, Non-Returnable Category, Missing Order ID, and Duplicate Request) are available as a pytest suite.
 
 #### A. Run as Pytest (Recommended)
-The test scenarios (Auto-Approve, Auto-Reject, Escalated Human Review, Non-Returnable Category, Missing Order ID, and Duplicate Request) have been converted to a pytest suite. To run the suite:
 ```bash
-pytest -v backend/cli_test.py
+uv run pytest -v backend/cli_test.py
 ```
-To run the suite and display the `rich` color-coded console panels and step-by-step audit tables:
+To display `rich` color-coded console panels and step-by-step audit tables:
 ```bash
-pytest -s -v backend/cli_test.py
+uv run pytest -s -v backend/cli_test.py
 ```
 
-#### B. Run the main.py entrypoint
-To execute the main backend runner:
+#### B. Run the main.py entrypoint directly
 ```bash
 uv run backend/main.py
 ```
-
