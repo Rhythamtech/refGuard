@@ -228,8 +228,21 @@ source .venv/bin/activate
 ```
 
 ### 3. Run the Verification Suite
-Execute the main script to run through the test scenarios (Auto-Approve, Auto-Reject, Escalated Human Review, Non-Returnable Category, Missing Order ID, and Duplicate Request):
+You can run the verification suite in two ways:
+
+#### A. Run as Pytest (Recommended)
+The test scenarios (Auto-Approve, Auto-Reject, Escalated Human Review, Non-Returnable Category, Missing Order ID, and Duplicate Request) have been converted to a pytest suite. To run the suite:
+```bash
+pytest -v backend/cli_test.py
+```
+To run the suite and display the `rich` color-coded console panels and step-by-step audit tables:
+```bash
+pytest -s -v backend/cli_test.py
+```
+
+#### B. Run the main.py entrypoint
+To execute the main backend runner:
 ```bash
 uv run backend/main.py
 ```
-This runs the entire LangGraph workflow state machine, performs DB mocks, cleans up temporary request data, and displays structured step-by-step audit logs in the terminal.
+

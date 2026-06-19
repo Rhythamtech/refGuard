@@ -3,7 +3,7 @@ from pathlib import Path
 import os
 import platform
 import re
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel, Field
 
 # Ensure DOCS_DIR points to backend/ so we can locate refund-policy.md
@@ -89,14 +89,27 @@ def read_policy_section(start_line: int, end_line: int) -> str:
         return f"Error reading policy section: {str(e)}"
 
 @tool
-def evaluate_eligibility(is_eligible: bool, reason: str, policy_sections: List[str]) -> str:
+def evaluate_eligibility(is_eligible: Any, reason: str, policy_sections: List[str]) -> str:
     """
     Submit the final eligibility decision for the refund request.
     This tool MUST be called to finish the evaluation. Do NOT try to output
     a text response as the final answer; call this tool instead.
+
+    Args:
+        is_eligible: "True"/"False" or true/false indicating if the customer/item is eligible.
+        reason: Detailed reason explaining the decision citing specific policy sections.
+        policy_sections: List of policy sections referenced.
     """
+    is_eligible_bool = False
+    if isinstance(is_eligible, bool):
+        is_eligible_bool = is_eligible
+    elif isinstance(is_eligible, str):
+        is_eligible_bool = is_eligible.strip().lower() in ("true", "1", "yes")
+    elif isinstance(is_eligible, (int, float)):
+        is_eligible_bool = bool(is_eligible)
+
     _final_verdict.set(EligibilityVerdict(
-        is_eligible=is_eligible,
+        is_eligible=is_eligible_bool,
         reason=reason,
         policy_sections=policy_sections
     ))

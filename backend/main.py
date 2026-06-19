@@ -1,6 +1,11 @@
 import os
 import sys
 from pathlib import Path
+
+# Setup system path so absolute imports work when running from different directories
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from typing import List, Optional, Literal
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -35,9 +40,6 @@ from contextlib import asynccontextmanager
 
 
 load_dotenv()
-
-sys.path.append(str(Path(__file__).parent.parent))
-sys.path.append(str(Path(__file__).parent))
 
 compiled_graph = None
 

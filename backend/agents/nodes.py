@@ -118,7 +118,7 @@ async def classify_intent_node(state: RefundState) -> dict:
         "unrelated_msg_count": unrelated_count,
         "audit_log": state["audit_log"] + [{
             "step": "classify_intent",
-            "result": result.dict(),
+            "result": result.model_dump(),
             "ts": datetime.now(timezone.utc).isoformat()
         }]
     }
@@ -436,6 +436,7 @@ async def check_eligibility_node(state: RefundState) -> dict:
 
     # Construct complete structured order context for the agent
     order_context = {
+        "current_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "customer_id": state["request"].customer_id,
         "order_id": state["request"].order_id,
         "order_item_id": order_item_id,
@@ -478,6 +479,10 @@ async def check_eligibility_node(state: RefundState) -> dict:
             response = await llm_with_tools.ainvoke(messages)
             messages.append(response)
 
+            print(f"\n--- ReAct Step {step} ---")
+            print(f"LLM Response content: {response.content}")
+            print(f"LLM Tool calls: {response.tool_calls}")
+
             if not response.tool_calls:
                 # Prompt the LLM to submit a final verdict via evaluate_eligibility if it stopped early
                 messages.append(("human", "You must conclude the evaluation by calling the `evaluate_eligibility` tool with the structured verdict. Please call `evaluate_eligibility` now."))
@@ -495,9 +500,17 @@ async def check_eligibility_node(state: RefundState) -> dict:
                 elif tool_name == "read_policy_section":
                     result = read_policy_section.invoke(tool_args)
                 elif tool_name == "evaluate_eligibility":
-                    result = evaluate_eligibility.invoke(tool_args)
+                    # Call the underlying function directly to propagate ContextVar in the same thread/context
+                    result = evaluate_eligibility.func(
+                        is_eligible=tool_args.get("is_eligible"),
+                        reason=tool_args.get("reason"),
+                        policy_sections=tool_args.get("policy_sections")
+                    )
                 else:
                     result = f"Unknown tool: {tool_name}"
+
+                print(f"Tool {tool_name} args: {tool_args}")
+                print(f"Tool result: {result}")
 
                 messages.append({
                     "role": "tool",
@@ -515,6 +528,8 @@ async def check_eligibility_node(state: RefundState) -> dict:
             step += 1
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {
             "is_eligible": True,
             "eligibility_reason": "LLM evaluation failed; escalating to human review",
